@@ -29,6 +29,41 @@ test_script_exposes_app_name() {
   assert_eq "fastvless" "$APP_NAME" "APP_NAME is fastvless"
 }
 
+test_json_escape_quotes_and_backslashes() {
+  local escaped
+  escaped="$(json_escape 'a"b\c')"
+  assert_eq 'a\"b\\c' "$escaped" "json_escape escapes quote and backslash"
+}
+
+test_valid_port_accepts_range() {
+  valid_port "443"
+  assert_eq "0" "$?" "valid_port accepts 443"
+}
+
+test_valid_port_rejects_bad_values() {
+  if valid_port "70000"; then
+    assert_eq "reject" "accept" "valid_port rejects 70000"
+  else
+    assert_eq "reject" "reject" "valid_port rejects 70000"
+  fi
+}
+
+test_state_round_trip() {
+  rm -rf "$FASTVLESS_BASE_DIR"
+  mkdir -p "$FASTVLESS_BASE_DIR"
+  UUID="11111111-1111-4111-8111-111111111111"
+  VLESS_PORT="24443"
+  REALITY_SNI="www.example.com"
+  save_state
+  UUID=""
+  VLESS_PORT=""
+  REALITY_SNI=""
+  load_state
+  assert_eq "11111111-1111-4111-8111-111111111111" "$UUID" "state keeps UUID"
+  assert_eq "24443" "$VLESS_PORT" "state keeps VLESS port"
+  assert_eq "www.example.com" "$REALITY_SNI" "state keeps SNI"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"
