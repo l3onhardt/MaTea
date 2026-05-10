@@ -348,6 +348,68 @@ write_links() {
   chmod 600 "$LINKS_FILE"
 }
 
+sing_box_asset_name() {
+  local version="$1"
+  local arch="$2"
+  case "$arch" in
+    amd64|arm64|armv7) ;;
+    *) return 1 ;;
+  esac
+  printf 'sing-box-%s-linux-%s.tar.gz\n' "$version" "$arch"
+}
+
+download_file() {
+  local url="$1"
+  local output="$2"
+  if command_exists curl; then
+    curl -fL --retry 2 --connect-timeout 10 -o "$output" "$url"
+  elif command_exists wget; then
+    wget -O "$output" "$url"
+  else
+    return 1
+  fi
+}
+
+install_sing_box_binary() {
+  local version="${1:-$SING_BOX_VERSION_DEFAULT}"
+  local arch asset url tmp_dir archive extracted
+  arch="$(normalize_arch)"
+  asset="$(sing_box_asset_name "$version" "$arch")"
+  url="https://github.com/SagerNet/sing-box/releases/download/v${version}/${asset}"
+  tmp_dir="$(mktemp -d)"
+  archive="$tmp_dir/$asset"
+  mkdir -p "$BASE_DIR"
+  info "下载 sing-box $version ($arch)"
+  download_file "$url" "$archive" || die "sing-box 下载失败: $url"
+  tar -xzf "$archive" -C "$tmp_dir" || die "sing-box 解压失败"
+  extracted="$(find "$tmp_dir" -type f -name sing-box | head -n 1)"
+  [[ -n "$extracted" ]] || die "sing-box 压缩包中没有找到二进制文件"
+  install -m 755 "$extracted" "$SING_BOX_BIN"
+  rm -rf "$tmp_dir"
+}
+
+parse_reality_keypair_output() {
+  local output="$1"
+  REALITY_PRIVATE_KEY="$(printf '%s\n' "$output" | awk -F: '/PrivateKey/{gsub(/^ /,"",$2); print $2; exit}')"
+  REALITY_PUBLIC_KEY="$(printf '%s\n' "$output" | awk -F: '/PublicKey/{gsub(/^ /,"",$2); print $2; exit}')"
+  [[ -n "$REALITY_PRIVATE_KEY" && -n "$REALITY_PUBLIC_KEY" ]]
+}
+
+generate_reality_values() {
+  [[ -x "$SING_BOX_BIN" ]] || die "sing-box 不存在，无法生成 Reality 密钥"
+  local output
+  output="$("$SING_BOX_BIN" generate reality-keypair)"
+  parse_reality_keypair_output "$output" || die "Reality 密钥生成失败"
+  REALITY_SHORT_ID="$("$SING_BOX_BIN" generate rand --hex 4)"
+}
+
+validate_config_if_possible() {
+  local config_path="${1:-$CONFIG_FILE}"
+  if [[ -x "$SING_BOX_BIN" ]]; then
+    "$SING_BOX_BIN" check -c "$config_path"
+  fi
+}
+
 main() {
   printf '%s\n' "FastVLESS"
 }

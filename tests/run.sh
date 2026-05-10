@@ -201,6 +201,20 @@ test_write_config_with_upstream_and_local_socks() {
   assert_eq "0" "$?" "config contains local socks inbound"
 }
 
+test_sing_box_asset_name_for_amd64() {
+  assert_eq "sing-box-1.13.11-linux-amd64.tar.gz" "$(sing_box_asset_name 1.13.11 amd64)" "amd64 asset name"
+}
+
+test_sing_box_asset_name_for_arm64() {
+  assert_eq "sing-box-1.13.11-linux-arm64.tar.gz" "$(sing_box_asset_name 1.13.11 arm64)" "arm64 asset name"
+}
+
+test_parse_reality_keypair_output() {
+  parse_reality_keypair_output $'PrivateKey: private-value\nPublicKey: public-value\n'
+  assert_eq "private-value" "$REALITY_PRIVATE_KEY" "parsed private key"
+  assert_eq "public-value" "$REALITY_PUBLIC_KEY" "parsed public key"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"
