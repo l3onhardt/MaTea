@@ -239,6 +239,9 @@ build_socks_links() {
   local port="${LOCAL_SOCKS_PUBLIC_PORT:-${LOCAL_SOCKS_PORT:-}}"
   local user="${LOCAL_SOCKS_USER:-}"
   local pass="${LOCAL_SOCKS_PASS:-}"
+  if [[ "${LOCAL_SOCKS_LISTEN:-127.0.0.1}" == "127.0.0.1" ]]; then
+    ip="127.0.0.1"
+  fi
   [[ -n "$ip" && -n "$port" && -n "$user" && -n "$pass" ]] || return 1
   printf 'SOCKS5 标准格式: socks5://%s:%s@%s:%s\n' "$user" "$pass" "$ip" "$port"
   printf 'SOCKS5 兼容格式: socks5://%s:%s:%s:%s\n' "$ip" "$port" "$user" "$pass"
@@ -595,9 +598,15 @@ prompt_yes_no() {
   local question="$1"
   local default="${2:-n}"
   local answer
-  read -r -p "$question [$default]: " answer
-  answer="${answer:-$default}"
-  [[ "$answer" =~ ^[Yy]$ ]]
+  while :; do
+    read -r -p "$question [$default]: " answer
+    answer="${answer:-$default}"
+    case "$answer" in
+      y|Y) return 0 ;;
+      n|N) return 1 ;;
+      *) warn "请输入 y 或 n，直接回车使用默认值 $default" >&2 ;;
+    esac
+  done
 }
 
 choose_random_port() {

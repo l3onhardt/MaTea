@@ -136,6 +136,7 @@ test_parse_socks_rejects_bad_port() {
 
 test_build_socks_links_outputs_two_formats() {
   SERVER_IP="203.0.113.9"
+  LOCAL_SOCKS_LISTEN="::"
   LOCAL_SOCKS_PUBLIC_PORT="24080"
   LOCAL_SOCKS_USER="localuser"
   LOCAL_SOCKS_PASS="localpass"
@@ -145,6 +146,26 @@ test_build_socks_links_outputs_two_formats() {
   assert_eq "0" "$?" "socks auth URI is printed"
   printf '%s\n' "$output" | grep -q 'socks5://203.0.113.9:24080:localuser:localpass'
   assert_eq "0" "$?" "socks compatibility URI is printed"
+}
+
+test_build_socks_links_uses_loopback_for_local_only() {
+  SERVER_IP="203.0.113.9"
+  LOCAL_SOCKS_LISTEN="127.0.0.1"
+  LOCAL_SOCKS_PUBLIC_PORT="24080"
+  LOCAL_SOCKS_USER="localuser"
+  LOCAL_SOCKS_PASS="localpass"
+  local output
+  output="$(build_socks_links)"
+  if printf '%s\n' "$output" | grep -q 'socks5://localuser:localpass@127.0.0.1:24080'; then
+    assert_eq "loopback" "loopback" "local-only socks uses loopback host"
+  else
+    assert_eq "loopback" "$output" "local-only socks uses loopback host"
+  fi
+  if printf '%s\n' "$output" | grep -q '203.0.113.9'; then
+    assert_eq "no-public-ip" "has-public-ip" "local-only socks should not print public IP"
+  else
+    assert_eq "no-public-ip" "no-public-ip" "local-only socks should not print public IP"
+  fi
 }
 
 test_build_vless_link_contains_reality_parameters() {
@@ -302,6 +323,14 @@ test_select_port_can_override_existing_port_default() {
   VLESS_PORT="30000"
   selected="$(printf '443\n' | select_port "VLESS" "$VLESS_PORT")"
   assert_eq "443" "$selected" "select_port overrides existing port when user enters one"
+}
+
+test_prompt_yes_no_retries_invalid_then_accepts_yes() {
+  if printf '33356\ny\n' | prompt_yes_no "NAT?" "n"; then
+    assert_eq "yes" "yes" "prompt_yes_no retries invalid input then accepts y"
+  else
+    assert_eq "yes" "no" "prompt_yes_no retries invalid input then accepts y"
+  fi
 }
 
 main() {
