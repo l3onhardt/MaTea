@@ -67,6 +67,10 @@ test_valid_port_rejects_bad_values() {
   fi
 }
 
+test_trim_input_removes_copy_paste_whitespace() {
+  assert_eq "33356" "$(trim_input $' 33356\r')" "trim_input strips whitespace and carriage return"
+}
+
 test_state_round_trip() {
   rm -rf "$FASTVLESS_BASE_DIR"
   mkdir -p "$FASTVLESS_BASE_DIR"
@@ -377,6 +381,10 @@ test_menu_contains_core_actions() {
 }
 
 test_initialize_defaults_sets_safe_local_socks() {
+  LOCAL_SOCKS_ENABLED=""
+  LOCAL_SOCKS_LISTEN=""
+  VLESS_PORT=""
+  LOCAL_SOCKS_PORT=""
   initialize_defaults
   assert_eq "0" "$LOCAL_SOCKS_ENABLED" "local socks disabled by default"
   assert_eq "127.0.0.1" "$LOCAL_SOCKS_LISTEN" "local socks listens locally by default"
@@ -388,6 +396,12 @@ test_select_port_uses_user_value() {
   local selected
   selected="$(printf '24443\n' | select_port "VLESS" "23333")"
   assert_eq "24443" "$selected" "select_port accepts user port"
+}
+
+test_select_port_accepts_pasted_port_with_carriage_return() {
+  local selected
+  selected="$(printf '33356\r\n' | select_port "VLESS" "23333")"
+  assert_eq "33356" "$selected" "select_port accepts pasted CRLF port"
 }
 
 test_select_port_uses_default_on_empty() {
@@ -414,6 +428,73 @@ test_prompt_yes_no_retries_invalid_then_accepts_yes() {
     assert_eq "yes" "yes" "prompt_yes_no retries invalid input then accepts y"
   else
     assert_eq "yes" "no" "prompt_yes_no retries invalid input then accepts y"
+  fi
+}
+
+test_disable_local_socks_clears_old_state() {
+  LOCAL_SOCKS_ENABLED="1"
+  LOCAL_SOCKS_LISTEN="::"
+  LOCAL_SOCKS_PORT="33357"
+  LOCAL_SOCKS_PUBLIC_PORT="33357"
+  LOCAL_SOCKS_USER="olduser"
+  LOCAL_SOCKS_PASS="oldpass"
+  disable_local_socks
+  assert_eq "0" "$LOCAL_SOCKS_ENABLED" "local socks disabled"
+  assert_eq "" "$LOCAL_SOCKS_PORT" "local socks port cleared"
+  assert_eq "" "$LOCAL_SOCKS_USER" "local socks user cleared"
+}
+
+test_enable_local_socks_default_generates_complete_state() {
+  LOCAL_SOCKS_ENABLED="0"
+  LOCAL_SOCKS_LISTEN=""
+  LOCAL_SOCKS_PORT=""
+  LOCAL_SOCKS_PUBLIC_PORT=""
+  LOCAL_SOCKS_USER=""
+  LOCAL_SOCKS_PASS=""
+  enable_local_socks_default
+  assert_eq "1" "$LOCAL_SOCKS_ENABLED" "local socks enabled"
+  assert_eq "127.0.0.1" "$LOCAL_SOCKS_LISTEN" "local socks default listen is local"
+  if valid_port "$LOCAL_SOCKS_PORT"; then
+    assert_eq "valid" "valid" "local socks default port generated"
+  else
+    assert_eq "valid" "$LOCAL_SOCKS_PORT" "local socks default port generated"
+  fi
+  assert_eq "$LOCAL_SOCKS_PORT" "$LOCAL_SOCKS_PUBLIC_PORT" "local socks public port defaults to listen port"
+  [[ -n "$LOCAL_SOCKS_USER" && -n "$LOCAL_SOCKS_PASS" ]]
+  assert_eq "0" "$?" "local socks credentials generated"
+}
+
+test_listen_output_detects_exact_port() {
+  local output
+  output=$'State Recv-Q Send-Q Local Address:Port Peer Address:Port Process\nLISTEN 0 4096 0.0.0.0:33356 0.0.0.0:* users:(("sing-box",pid=1,fd=3))'
+  ss_listen_output_has_port "$output" "33356"
+  assert_eq "0" "$?" "listen parser detects expected port"
+  if ss_listen_output_has_port "$output" "3335"; then
+    assert_eq "reject" "accept" "listen parser does not match partial port"
+  else
+    assert_eq "reject" "reject" "listen parser does not match partial port"
+  fi
+}
+
+test_show_links_rebuilds_when_socks_disabled() {
+  rm -rf "$FASTVLESS_BASE_DIR"
+  mkdir -p "$FASTVLESS_BASE_DIR"
+  UUID="11111111-1111-4111-8111-111111111111"
+  SERVER_IP="203.0.113.9"
+  VLESS_PORT="24443"
+  PUBLIC_VLESS_PORT="24443"
+  REALITY_SNI="www.example.com"
+  REALITY_PUBLIC_KEY="publicKeyValue"
+  REALITY_SHORT_ID="abcd1234"
+  LOCAL_SOCKS_ENABLED="0"
+  save_state
+  printf 'VLESS Reality:\nstale\n\nSOCKS5 标准格式: socks5://old:old@203.0.113.9:33357\n' >"$FASTVLESS_BASE_DIR/links.txt"
+  local output
+  output="$(show_links)"
+  if printf '%s\n' "$output" | grep -q 'SOCKS5'; then
+    assert_eq "no-socks" "$output" "show_links does not show stale socks links"
+  else
+    assert_eq "no-socks" "no-socks" "show_links does not show stale socks links"
   fi
 }
 

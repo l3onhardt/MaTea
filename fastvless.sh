@@ -83,8 +83,13 @@ json_escape() {
   printf '%s' "$value"
 }
 
+trim_input() {
+  printf '%s' "${1:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
 valid_port() {
-  local port="${1:-}"
+  local port
+  port="$(trim_input "${1:-}")"
   [[ "$port" =~ ^[0-9]+$ ]] || return 1
   (( port >= 1 && port <= 65535 ))
 }
@@ -667,7 +672,8 @@ start_service() {
   if [[ "$(detect_init_system)" == "systemd" ]]; then
     write_systemd_service
     systemctl daemon-reload
-    systemctl enable --now "$SERVICE_NAME"
+    systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+    systemctl restart "$SERVICE_NAME"
   else
     if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
       kill "$(cat "$PID_FILE")" 2>/dev/null || true
@@ -675,6 +681,80 @@ start_service() {
     nohup "$SING_BOX_BIN" run -c "$CONFIG_FILE" >>"$LOG_FILE" 2>&1 &
     printf '%s\n' "$!" >"$PID_FILE"
   fi
+}
+
+ss_listen_output_has_port() {
+  local output="$1"
+  local port="$2"
+  valid_port "$port" || return 1
+  printf '%s\n' "$output" | awk -v port="$port" '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ ":" port "$") {
+          found = 1
+        }
+      }
+    }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+port_is_listening() {
+  local port="$1"
+  local output
+  command_exists ss || return 2
+  output="$(ss -ltnp 2>/dev/null || ss -ltn 2>/dev/null || true)"
+  ss_listen_output_has_port "$output" "$port"
+}
+
+verify_runtime_listeners() {
+  local tries port label port_label failed
+  failed=0
+  if ! command_exists ss; then
+    warn "缺少 ss 命令，跳过本机监听检测"
+    return 0
+  fi
+  for port_label in "${VLESS_PORT:-}:VLESS" "${LOCAL_SOCKS_PORT:-}:SOCKS5"; do
+    port="${port_label%%:*}"
+    label="${port_label#*:}"
+    [[ -n "$port" ]] || continue
+    [[ "$label" == "SOCKS5" && "${LOCAL_SOCKS_ENABLED:-0}" != "1" ]] && continue
+    for tries in 1 2 3 4 5; do
+      if port_is_listening "$port"; then
+        info "$label 已监听端口: $port"
+        break
+      fi
+      sleep 1
+    done
+    if ! port_is_listening "$port"; then
+      warn "$label 端口未监听: $port"
+      failed=1
+    fi
+  done
+  return "$failed"
+}
+
+restart_service_and_verify() {
+  start_service
+  verify_runtime_listeners || die "服务启动后没有监听 VLESS 端口，请用菜单 7 查看日志"
+}
+
+disable_local_socks() {
+  LOCAL_SOCKS_ENABLED="0"
+  LOCAL_SOCKS_LISTEN="127.0.0.1"
+  LOCAL_SOCKS_PORT=""
+  LOCAL_SOCKS_PUBLIC_PORT=""
+  LOCAL_SOCKS_USER=""
+  LOCAL_SOCKS_PASS=""
+}
+
+enable_local_socks_default() {
+  LOCAL_SOCKS_ENABLED="1"
+  LOCAL_SOCKS_LISTEN="${LOCAL_SOCKS_LISTEN:-127.0.0.1}"
+  [[ -n "${LOCAL_SOCKS_PORT:-}" ]] || LOCAL_SOCKS_PORT="$(choose_random_port)"
+  LOCAL_SOCKS_PUBLIC_PORT="${LOCAL_SOCKS_PUBLIC_PORT:-$LOCAL_SOCKS_PORT}"
+  LOCAL_SOCKS_USER="${LOCAL_SOCKS_USER:-fv$(random_hex 3)}"
+  LOCAL_SOCKS_PASS="${LOCAL_SOCKS_PASS:-$(random_password)}"
 }
 
 stop_service() {
@@ -724,6 +804,7 @@ prompt_yes_no() {
   local answer
   while :; do
     read -r -p "$question [$default]: " answer
+    answer="$(trim_input "$answer")"
     answer="${answer:-$default}"
     case "$answer" in
       y|Y) return 0 ;;
@@ -750,6 +831,7 @@ select_port() {
   local input
   while :; do
     read -r -p "$label 端口，回车使用随机端口 $default_port: " input
+    input="$(trim_input "$input")"
     input="${input:-$default_port}"
     if valid_port "$input"; then
       printf '%s\n' "$input"
@@ -827,6 +909,8 @@ recommended_install() {
       LOCAL_SOCKS_LISTEN="127.0.0.1"
       LOCAL_SOCKS_PUBLIC_PORT="$LOCAL_SOCKS_PORT"
     fi
+  else
+    disable_local_socks
   fi
   if prompt_yes_no "是否一键启用保守 BBR 加速" "y"; then
     enable_bbr_if_supported || true
@@ -834,14 +918,14 @@ recommended_install() {
   save_state
   write_config "$CONFIG_FILE"
   validate_config_if_possible "$CONFIG_FILE"
-  start_service
+  restart_service_and_verify
   write_links
   show_links
 }
 
 show_links() {
   load_state
-  if [[ -f "$LINKS_FILE" ]]; then
+  if [[ -f "$LINKS_FILE" && "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then
     cat "$LINKS_FILE"
   else
     build_vless_link
@@ -891,9 +975,9 @@ main_menu() {
     case "$choice" in
       1) recommended_install ;;
       2) show_links ;;
-      3) read -r -p "请输入上游 SOCKS5: " upstream_input; configure_upstream_socks_from_uri "$upstream_input" && write_config "$CONFIG_FILE" && start_service && write_links ;;
-      4) load_state; initialize_defaults; if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then LOCAL_SOCKS_ENABLED="0"; else LOCAL_SOCKS_ENABLED="1"; fi; save_state; write_config "$CONFIG_FILE"; start_service; write_links; show_links ;;
-      5) load_state; select_reality_sni || die "SNI 重新选择失败"; save_state; write_config "$CONFIG_FILE"; start_service; write_links; show_links ;;
+      3) read -r -p "请输入上游 SOCKS5: " upstream_input; configure_upstream_socks_from_uri "$upstream_input" && write_config "$CONFIG_FILE" && restart_service_and_verify && write_links ;;
+      4) load_state; initialize_defaults; if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then disable_local_socks; else enable_local_socks_default; fi; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
+      5) load_state; select_reality_sni || die "SNI 重新选择失败"; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
       6) enable_bbr_if_supported || true ;;
       7) show_status ;;
       8) uninstall_fastvless ;;

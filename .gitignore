@@ -1,1 +1,6 @@
 .worktrees/
+.tmp/
+tests/fixtures/etc/
+tests/fixtures/os-release
+tests/fixtures/sysctl.d/
+tests/fixtures/systemd/
