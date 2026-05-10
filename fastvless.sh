@@ -410,6 +410,73 @@ validate_config_if_possible() {
   fi
 }
 
+default_sni_candidates() {
+  cat <<'EOF_SNI'
+www.microsoft.com
+www.apple.com
+www.cloudflare.com
+www.samsung.com
+www.oracle.com
+www.cisco.com
+www.ibm.com
+www.mozilla.org
+www.bing.com
+EOF_SNI
+}
+
+validate_sni_domain() {
+  local domain="$1"
+  [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]]
+}
+
+check_sni_candidate() {
+  local domain="$1"
+  local start end elapsed output
+  validate_sni_domain "$domain" || {
+    printf '%s|fail|999999\n' "$domain"
+    return 0
+  }
+  command_exists openssl || {
+    printf '%s|pass|999\n' "$domain"
+    return 0
+  }
+  start="$(date +%s%3N 2>/dev/null || date +%s)"
+  output="$(printf '' | timeout 6 openssl s_client -connect "${domain}:443" -servername "$domain" -tls1_3 -alpn h2 -brief 2>&1 || true)"
+  end="$(date +%s%3N 2>/dev/null || date +%s)"
+  elapsed=$((end - start))
+  if printf '%s\n' "$output" | grep -qiE 'Protocol version: TLSv1.3|Protocol *: TLSv1.3|CONNECTION ESTABLISHED'; then
+    printf '%s|pass|%s\n' "$domain" "$elapsed"
+  else
+    printf '%s|fail|%s\n' "$domain" "$elapsed"
+  fi
+}
+
+select_best_sni_row() {
+  local rows="$1"
+  printf '%s\n' "$rows" |
+    awk -F'|' '$2=="pass"{print $3 "|" $1}' |
+    sort -n |
+    head -n 1 |
+    awk -F'|' '{print $2}'
+}
+
+select_reality_sni() {
+  local rows best domain
+  rows=""
+  while IFS= read -r domain; do
+    [[ -n "$domain" ]] || continue
+    info "检测 SNI: $domain"
+    rows="${rows}$(check_sni_candidate "$domain")"$'\n'
+  done < <(default_sni_candidates)
+  best="$(select_best_sni_row "$rows")"
+  if [[ -n "$best" ]]; then
+    REALITY_SNI="$best"
+    info "已选择 Reality SNI: $REALITY_SNI"
+    return 0
+  fi
+  return 1
+}
+
 main() {
   printf '%s\n' "FastVLESS"
 }

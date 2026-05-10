@@ -215,6 +215,24 @@ test_parse_reality_keypair_output() {
   assert_eq "public-value" "$REALITY_PUBLIC_KEY" "parsed public key"
 }
 
+test_validate_sni_domain_accepts_hostname() {
+  validate_sni_domain "www.example.com"
+  assert_eq "0" "$?" "valid hostname accepted"
+}
+
+test_validate_sni_domain_rejects_protocol() {
+  if validate_sni_domain "https://www.example.com"; then
+    assert_eq "reject" "accept" "protocol rejected"
+  else
+    assert_eq "reject" "reject" "protocol rejected"
+  fi
+}
+
+test_select_best_sni_row_picks_lowest_latency_pass() {
+  local rows=$'www.slow.com|pass|300\nwww.fast.com|pass|80\nwww.fail.com|fail|20'
+  assert_eq "www.fast.com" "$(select_best_sni_row "$rows")" "lowest latency passing SNI selected"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"
