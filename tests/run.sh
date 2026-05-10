@@ -233,6 +233,24 @@ test_select_best_sni_row_picks_lowest_latency_pass() {
   assert_eq "www.fast.com" "$(select_best_sni_row "$rows")" "lowest latency passing SNI selected"
 }
 
+test_write_bbr_sysctl_file() {
+  rm -rf "$FASTVLESS_SYSCTL_DIR"
+  mkdir -p "$FASTVLESS_SYSCTL_DIR"
+  write_bbr_sysctl_file
+  grep -q 'net.core.default_qdisc=fq' "$FASTVLESS_SYSCTL_DIR/99-fastvless-bbr.conf"
+  assert_eq "0" "$?" "bbr sysctl has fq"
+  grep -q 'net.ipv4.tcp_congestion_control=bbr' "$FASTVLESS_SYSCTL_DIR/99-fastvless-bbr.conf"
+  assert_eq "0" "$?" "bbr sysctl has bbr"
+}
+
+test_write_systemd_service_file() {
+  rm -rf "$FASTVLESS_SYSTEMD_DIR"
+  mkdir -p "$FASTVLESS_SYSTEMD_DIR" "$FASTVLESS_BASE_DIR"
+  write_systemd_service
+  grep -q 'ExecStart=.*sing-box run -c' "$FASTVLESS_SYSTEMD_DIR/fastvless.service"
+  assert_eq "0" "$?" "systemd service runs sing-box"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"

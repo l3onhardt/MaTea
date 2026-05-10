@@ -477,6 +477,70 @@ select_reality_sni() {
   return 1
 }
 
+write_bbr_sysctl_file() {
+  mkdir -p "$SYSCTL_DIR"
+  cat >"$BBR_SYSCTL_FILE" <<'EOF_BBR'
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+EOF_BBR
+}
+
+enable_bbr_if_supported() {
+  local virt available
+  virt="$(detect_virtualization)"
+  available="$(get_available_bbr_modules)"
+  if ! can_enable_bbr "$virt" "$available"; then
+    warn "当前环境不适合自动修改 BBR: virt=$virt available=$available"
+    return 1
+  fi
+  write_bbr_sysctl_file
+  sysctl --system >/dev/null 2>&1 || sysctl -p "$BBR_SYSCTL_FILE" >/dev/null 2>&1 || return 1
+  info "BBR 已启用: $(get_current_bbr)"
+}
+
+write_systemd_service() {
+  mkdir -p "$SYSTEMD_DIR"
+  cat >"$SYSTEMD_DIR/$SERVICE_NAME.service" <<EOF_SERVICE
+[Unit]
+Description=FastVLESS sing-box service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$SING_BOX_BIN run -c $CONFIG_FILE
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF_SERVICE
+}
+
+start_service() {
+  if [[ "$(detect_init_system)" == "systemd" ]]; then
+    write_systemd_service
+    systemctl daemon-reload
+    systemctl enable --now "$SERVICE_NAME"
+  else
+    if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      kill "$(cat "$PID_FILE")" 2>/dev/null || true
+    fi
+    nohup "$SING_BOX_BIN" run -c "$CONFIG_FILE" >>"$LOG_FILE" 2>&1 &
+    printf '%s\n' "$!" >"$PID_FILE"
+  fi
+}
+
+stop_service() {
+  if [[ "$(detect_init_system)" == "systemd" ]] && [[ -f "$SYSTEMD_DIR/$SERVICE_NAME.service" ]]; then
+    systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true
+  elif [[ -f "$PID_FILE" ]]; then
+    kill "$(cat "$PID_FILE")" 2>/dev/null || true
+    rm -f "$PID_FILE"
+  fi
+}
+
 main() {
   printf '%s\n' "FastVLESS"
 }
