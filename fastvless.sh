@@ -541,8 +541,188 @@ stop_service() {
   fi
 }
 
+menu_text() {
+  cat <<'EOF_MENU'
+
+FastVLESS
+1. 推荐一键安装/修复
+2. 查看 VLESS 链接
+3. 配置上游 SOCKS5 出站
+4. 开启/关闭本机 SOCKS5 导出
+5. 重新优选 Reality SNI
+6. 一键 BBR/查看加速状态
+7. 查看服务状态/日志
+8. 卸载
+0. 退出
+EOF_MENU
+}
+
+initialize_defaults() {
+  UUID="${UUID:-}"
+  VLESS_PORT="${VLESS_PORT:-24443}"
+  PUBLIC_VLESS_PORT="${PUBLIC_VLESS_PORT:-$VLESS_PORT}"
+  REALITY_SNI="${REALITY_SNI:-}"
+  REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-}"
+  REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-}"
+  REALITY_SHORT_ID="${REALITY_SHORT_ID:-}"
+  SERVER_IP="${SERVER_IP:-}"
+  UPSTREAM_SOCKS_ENABLED="${UPSTREAM_SOCKS_ENABLED:-0}"
+  LOCAL_SOCKS_ENABLED="${LOCAL_SOCKS_ENABLED:-0}"
+  LOCAL_SOCKS_LISTEN="${LOCAL_SOCKS_LISTEN:-127.0.0.1}"
+  LOCAL_SOCKS_PORT="${LOCAL_SOCKS_PORT:-24080}"
+  LOCAL_SOCKS_PUBLIC_PORT="${LOCAL_SOCKS_PUBLIC_PORT:-$LOCAL_SOCKS_PORT}"
+  LOCAL_SOCKS_USER="${LOCAL_SOCKS_USER:-fv$(random_hex 3)}"
+  LOCAL_SOCKS_PASS="${LOCAL_SOCKS_PASS:-$(random_password)}"
+}
+
+prompt_yes_no() {
+  local question="$1"
+  local default="${2:-n}"
+  local answer
+  read -r -p "$question [$default]: " answer
+  answer="${answer:-$default}"
+  [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+choose_random_port() {
+  local port
+  while :; do
+    port="$((RANDOM % 40000 + 20000))"
+    if ! ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":$port$"; then
+      printf '%s\n' "$port"
+      return 0
+    fi
+  done
+}
+
+get_public_ip() {
+  local ip
+  for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+    if command_exists curl; then
+      ip="$(curl -fsS --max-time 5 "$url" 2>/dev/null || true)"
+    elif command_exists wget; then
+      ip="$(wget -qO- --timeout=5 "$url" 2>/dev/null || true)"
+    else
+      ip=""
+    fi
+    if [[ "$ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
+      printf '%s\n' "$ip"
+      return 0
+    fi
+  done
+  return 1
+}
+
+generate_uuid() {
+  if [[ -x "$SING_BOX_BIN" ]]; then
+    "$SING_BOX_BIN" generate uuid
+  elif command_exists uuidgen; then
+    uuidgen | tr 'A-Z' 'a-z'
+  else
+    printf '%s-%s-%s-%s-%s\n' "$(random_hex 4)" "$(random_hex 2)" "$(random_hex 2)" "$(random_hex 2)" "$(random_hex 6)"
+  fi
+}
+
+recommended_install() {
+  [[ "$(id -u)" -eq 0 ]] || die "请使用 root 运行"
+  preflight_space_check
+  mkdir -p "$BASE_DIR"
+  chmod 700 "$BASE_DIR"
+  load_state
+  initialize_defaults
+  install_sing_box_binary "$SING_BOX_VERSION_DEFAULT"
+  UUID="${UUID:-$(generate_uuid)}"
+  VLESS_PORT="${VLESS_PORT:-$(choose_random_port)}"
+  PUBLIC_VLESS_PORT="${PUBLIC_VLESS_PORT:-$VLESS_PORT}"
+  SERVER_IP="${SERVER_IP:-$(get_public_ip || true)}"
+  [[ -n "$SERVER_IP" ]] || read -r -p "未能自动识别公网 IP，请输入服务器 IP: " SERVER_IP
+  generate_reality_values
+  if ! select_reality_sni; then
+    read -r -p "自动选择 SNI 失败，请输入 Reality SNI: " REALITY_SNI
+    validate_sni_domain "$REALITY_SNI" || die "SNI 格式不正确"
+  fi
+  if prompt_yes_no "是否配置外部 SOCKS5 作为上游出口" "n"; then
+    local upstream
+    read -r -p "请输入 socks5://host:port:user:pass 或 socks5://user:pass@host:port: " upstream
+    configure_upstream_socks_from_uri "$upstream" || die "SOCKS5 格式不正确"
+  fi
+  if prompt_yes_no "是否导出本机 SOCKS5 给其他工具使用" "n"; then
+    LOCAL_SOCKS_ENABLED="1"
+    LOCAL_SOCKS_PORT="${LOCAL_SOCKS_PORT:-$(choose_random_port)}"
+    if prompt_yes_no "是否允许公网访问本机 SOCKS5" "n"; then
+      LOCAL_SOCKS_LISTEN="::"
+    else
+      LOCAL_SOCKS_LISTEN="127.0.0.1"
+    fi
+  fi
+  if prompt_yes_no "是否一键启用保守 BBR 加速" "y"; then
+    enable_bbr_if_supported || true
+  fi
+  save_state
+  write_config "$CONFIG_FILE"
+  validate_config_if_possible "$CONFIG_FILE"
+  start_service
+  write_links
+  show_links
+}
+
+show_links() {
+  load_state
+  if [[ -f "$LINKS_FILE" ]]; then
+    cat "$LINKS_FILE"
+  else
+    build_vless_link
+    if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then
+      build_socks_links
+    fi
+  fi
+}
+
+show_status() {
+  printf '配置目录: %s\n' "$BASE_DIR"
+  printf '当前 BBR: %s\n' "$(get_current_bbr || true)"
+  if [[ "$(detect_init_system)" == "systemd" ]]; then
+    systemctl status "$SERVICE_NAME" --no-pager || true
+    journalctl -u "$SERVICE_NAME" -n 50 --no-pager || true
+  else
+    [[ -f "$PID_FILE" ]] && printf 'PID: %s\n' "$(cat "$PID_FILE")"
+    tail -n 50 "$LOG_FILE" 2>/dev/null || true
+  fi
+}
+
+uninstall_fastvless() {
+  stop_service
+  rm -f "$SYSTEMD_DIR/$SERVICE_NAME.service"
+  rm -rf "$BASE_DIR"
+  if prompt_yes_no "是否移除 FastVLESS 写入的 BBR 配置" "n"; then
+    rm -f "$BBR_SYSCTL_FILE"
+    sysctl --system >/dev/null 2>&1 || true
+  fi
+  info "已卸载 FastVLESS"
+}
+
+main_menu() {
+  local choice upstream_input
+  while :; do
+    menu_text
+    read -r -p "请选择: " choice
+    case "$choice" in
+      1) recommended_install ;;
+      2) show_links ;;
+      3) read -r -p "请输入上游 SOCKS5: " upstream_input; configure_upstream_socks_from_uri "$upstream_input" && write_config "$CONFIG_FILE" && start_service && write_links ;;
+      4) load_state; initialize_defaults; if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then LOCAL_SOCKS_ENABLED="0"; else LOCAL_SOCKS_ENABLED="1"; fi; save_state; write_config "$CONFIG_FILE"; start_service; write_links; show_links ;;
+      5) load_state; select_reality_sni || die "SNI 重新选择失败"; save_state; write_config "$CONFIG_FILE"; start_service; write_links; show_links ;;
+      6) enable_bbr_if_supported || true ;;
+      7) show_status ;;
+      8) uninstall_fastvless ;;
+      0) exit 0 ;;
+      *) warn "无效选项" ;;
+    esac
+  done
+}
+
 main() {
-  printf '%s\n' "FastVLESS"
+  main_menu
 }
 
 if [[ "${FASTVLESS_TEST_MODE:-0}" != "1" ]]; then

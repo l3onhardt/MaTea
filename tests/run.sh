@@ -251,6 +251,23 @@ test_write_systemd_service_file() {
   assert_eq "0" "$?" "systemd service runs sing-box"
 }
 
+test_menu_contains_core_actions() {
+  local menu
+  menu="$(menu_text)"
+  printf '%s\n' "$menu" | grep -q '推荐一键安装'
+  assert_eq "0" "$?" "menu has recommended install"
+  printf '%s\n' "$menu" | grep -q '配置上游 SOCKS5'
+  assert_eq "0" "$?" "menu has upstream socks action"
+  printf '%s\n' "$menu" | grep -q '开启/关闭本机 SOCKS5'
+  assert_eq "0" "$?" "menu has local socks action"
+}
+
+test_initialize_defaults_sets_safe_local_socks() {
+  initialize_defaults
+  assert_eq "0" "$LOCAL_SOCKS_ENABLED" "local socks disabled by default"
+  assert_eq "127.0.0.1" "$LOCAL_SOCKS_LISTEN" "local socks listens locally by default"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"
