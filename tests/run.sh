@@ -212,6 +212,8 @@ test_write_config_with_direct_outbound() {
   write_config "$FASTVLESS_BASE_DIR/config.json"
   grep -q '"type": "vless"' "$FASTVLESS_BASE_DIR/config.json"
   assert_eq "0" "$?" "config contains vless inbound"
+  grep -q '"listen": "0.0.0.0"' "$FASTVLESS_BASE_DIR/config.json"
+  assert_eq "0" "$?" "vless listens on IPv4 wildcard"
   grep -q '"tag": "direct"' "$FASTVLESS_BASE_DIR/config.json"
   assert_eq "0" "$?" "config contains direct outbound"
 }

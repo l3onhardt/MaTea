@@ -328,7 +328,7 @@ write_config() {
     {
       "type": "vless",
       "tag": "vless-reality",
-      "listen": "::",
+      "listen": "0.0.0.0",
       "listen_port": ${VLESS_PORT},
       "users": [
         {
@@ -854,6 +854,14 @@ show_links() {
 show_status() {
   printf '配置目录: %s\n' "$BASE_DIR"
   printf '当前 BBR: %s\n' "$(get_current_bbr || true)"
+  load_state
+  printf 'VLESS 本机端口: %s\n' "${VLESS_PORT:-未配置}"
+  printf 'VLESS 公网端口: %s\n' "${PUBLIC_VLESS_PORT:-${VLESS_PORT:-未配置}}"
+  printf 'Reality SNI: %s\n' "${REALITY_SNI:-未配置}"
+  if command_exists ss; then
+    printf '监听状态:\n'
+    ss -ltnp 2>/dev/null | grep -E ":(${VLESS_PORT:-0}|${LOCAL_SOCKS_PORT:-0})\\b" || true
+  fi
   if [[ "$(detect_init_system)" == "systemd" ]]; then
     systemctl status "$SERVICE_NAME" --no-pager || true
     journalctl -u "$SERVICE_NAME" -n 50 --no-pager || true
