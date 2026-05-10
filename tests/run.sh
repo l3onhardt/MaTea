@@ -266,6 +266,8 @@ test_initialize_defaults_sets_safe_local_socks() {
   initialize_defaults
   assert_eq "0" "$LOCAL_SOCKS_ENABLED" "local socks disabled by default"
   assert_eq "127.0.0.1" "$LOCAL_SOCKS_LISTEN" "local socks listens locally by default"
+  assert_eq "" "$VLESS_PORT" "vless port is chosen during install"
+  assert_eq "" "$LOCAL_SOCKS_PORT" "local socks port is chosen only when enabled"
 }
 
 main() {
