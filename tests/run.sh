@@ -138,6 +138,69 @@ test_build_socks_links_outputs_two_formats() {
   assert_eq "0" "$?" "socks compatibility URI is printed"
 }
 
+test_build_vless_link_contains_reality_parameters() {
+  UUID="11111111-1111-4111-8111-111111111111"
+  SERVER_IP="203.0.113.9"
+  PUBLIC_VLESS_PORT="24443"
+  REALITY_SNI="www.example.com"
+  REALITY_PUBLIC_KEY="publicKeyValue"
+  REALITY_SHORT_ID="abcd1234"
+  local link
+  link="$(build_vless_link)"
+  printf '%s\n' "$link" | grep -q '^vless://11111111-1111-4111-8111-111111111111@203.0.113.9:24443?'
+  assert_eq "0" "$?" "vless link starts with uuid host port"
+  printf '%s\n' "$link" | grep -q 'security=reality'
+  assert_eq "0" "$?" "vless link has reality security"
+  printf '%s\n' "$link" | grep -q 'sni=www.example.com'
+  assert_eq "0" "$?" "vless link has sni"
+  printf '%s\n' "$link" | grep -q 'pbk=publicKeyValue'
+  assert_eq "0" "$?" "vless link has public key"
+  printf '%s\n' "$link" | grep -q 'sid=abcd1234'
+  assert_eq "0" "$?" "vless link has short id"
+}
+
+test_write_config_with_direct_outbound() {
+  rm -rf "$FASTVLESS_BASE_DIR"
+  mkdir -p "$FASTVLESS_BASE_DIR"
+  UUID="11111111-1111-4111-8111-111111111111"
+  VLESS_PORT="24443"
+  REALITY_SNI="www.example.com"
+  REALITY_PRIVATE_KEY="privateKeyValue"
+  REALITY_SHORT_ID="abcd1234"
+  UPSTREAM_SOCKS_ENABLED="0"
+  LOCAL_SOCKS_ENABLED="0"
+  write_config "$FASTVLESS_BASE_DIR/config.json"
+  grep -q '"type": "vless"' "$FASTVLESS_BASE_DIR/config.json"
+  assert_eq "0" "$?" "config contains vless inbound"
+  grep -q '"tag": "direct"' "$FASTVLESS_BASE_DIR/config.json"
+  assert_eq "0" "$?" "config contains direct outbound"
+}
+
+test_write_config_with_upstream_and_local_socks() {
+  rm -rf "$FASTVLESS_BASE_DIR"
+  mkdir -p "$FASTVLESS_BASE_DIR"
+  UUID="11111111-1111-4111-8111-111111111111"
+  VLESS_PORT="24443"
+  REALITY_SNI="www.example.com"
+  REALITY_PRIVATE_KEY="privateKeyValue"
+  REALITY_SHORT_ID="abcd1234"
+  UPSTREAM_SOCKS_ENABLED="1"
+  UPSTREAM_SOCKS_HOST="proxy.example.com"
+  UPSTREAM_SOCKS_PORT="1080"
+  UPSTREAM_SOCKS_USER="upuser"
+  UPSTREAM_SOCKS_PASS="uppass"
+  LOCAL_SOCKS_ENABLED="1"
+  LOCAL_SOCKS_LISTEN="127.0.0.1"
+  LOCAL_SOCKS_PORT="24080"
+  LOCAL_SOCKS_USER="localuser"
+  LOCAL_SOCKS_PASS="localpass"
+  write_config "$FASTVLESS_BASE_DIR/config.json"
+  grep -q '"tag": "upstream-socks"' "$FASTVLESS_BASE_DIR/config.json"
+  assert_eq "0" "$?" "config contains upstream socks outbound"
+  grep -q '"tag": "local-socks"' "$FASTVLESS_BASE_DIR/config.json"
+  assert_eq "0" "$?" "config contains local socks inbound"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"

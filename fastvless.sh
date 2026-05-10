@@ -237,6 +237,117 @@ configure_upstream_socks_from_uri() {
   save_state
 }
 
+build_vless_link() {
+  local uuid="${UUID:-}"
+  local ip="${SERVER_IP:-}"
+  local port="${PUBLIC_VLESS_PORT:-${VLESS_PORT:-}}"
+  local sni="${REALITY_SNI:-}"
+  local public_key="${REALITY_PUBLIC_KEY:-}"
+  local short_id="${REALITY_SHORT_ID:-}"
+  [[ -n "$uuid" && -n "$ip" && -n "$port" && -n "$sni" && -n "$public_key" && -n "$short_id" ]] || return 1
+  printf 'vless://%s@%s:%s?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp&headerType=none#fastvless-%s\n' \
+    "$uuid" "$ip" "$port" "$sni" "$public_key" "$short_id" "$sni"
+}
+
+write_config() {
+  local output="${1:-$CONFIG_FILE}"
+  local final_outbound="direct"
+  local local_socks_block=""
+  local upstream_socks_block=""
+
+  if [[ "${UPSTREAM_SOCKS_ENABLED:-0}" == "1" ]]; then
+    final_outbound="upstream-socks"
+    upstream_socks_block=",{
+      \"type\": \"socks\",
+      \"tag\": \"upstream-socks\",
+      \"server\": \"$(json_escape "$UPSTREAM_SOCKS_HOST")\",
+      \"server_port\": ${UPSTREAM_SOCKS_PORT},
+      \"version\": \"5\",
+      \"username\": \"$(json_escape "$UPSTREAM_SOCKS_USER")\",
+      \"password\": \"$(json_escape "$UPSTREAM_SOCKS_PASS")\"
+    }"
+  fi
+
+  if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then
+    local_socks_block=",{
+      \"type\": \"socks\",
+      \"tag\": \"local-socks\",
+      \"listen\": \"$(json_escape "$LOCAL_SOCKS_LISTEN")\",
+      \"listen_port\": ${LOCAL_SOCKS_PORT},
+      \"users\": [
+        {
+          \"username\": \"$(json_escape "$LOCAL_SOCKS_USER")\",
+          \"password\": \"$(json_escape "$LOCAL_SOCKS_PASS")\"
+        }
+      ]
+    }"
+  fi
+
+  mkdir -p "$(dirname "$output")"
+  umask 077
+  cat >"$output.tmp" <<EOF_CONFIG
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-reality",
+      "listen": "::",
+      "listen_port": ${VLESS_PORT},
+      "users": [
+        {
+          "uuid": "$(json_escape "$UUID")",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "$(json_escape "$REALITY_SNI")",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "$(json_escape "$REALITY_SNI")",
+            "server_port": 443
+          },
+          "private_key": "$(json_escape "$REALITY_PRIVATE_KEY")",
+          "short_id": [
+            "$(json_escape "$REALITY_SHORT_ID")"
+          ]
+        }
+      }
+    }${local_socks_block}
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }${upstream_socks_block}
+  ],
+  "route": {
+    "final": "${final_outbound}"
+  }
+}
+EOF_CONFIG
+  mv "$output.tmp" "$output"
+  chmod 600 "$output"
+}
+
+write_links() {
+  mkdir -p "$BASE_DIR"
+  {
+    printf 'VLESS Reality:\n'
+    build_vless_link
+    if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then
+      printf '\n'
+      build_socks_links
+    fi
+  } >"$LINKS_FILE"
+  chmod 600 "$LINKS_FILE"
+}
+
 main() {
   printf '%s\n' "FastVLESS"
 }
