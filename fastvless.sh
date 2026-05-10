@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 APP_NAME="fastvless"
+DISPLAY_NAME="马王脚本"
+DISPLAY_TAGLINE="马哥梯子 | VLESS Reality 一键加速"
 BASE_DIR="${FASTVLESS_BASE_DIR:-/etc/fastvless}"
 SYSTEMD_DIR="${FASTVLESS_SYSTEMD_DIR:-/etc/systemd/system}"
 SYSCTL_DIR="${FASTVLESS_SYSCTL_DIR:-/etc/sysctl.d}"
@@ -41,6 +43,22 @@ die() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+banner_text() {
+  cat <<'EOF_BANNER'
+ __  __    _    __        ___    _   _  ____
+|  \/  |  / \   \ \      / / \  | \ | |/ ___|
+| |\/| | / _ \   \ \ /\ / / _ \ |  \| | |  _
+| |  | |/ ___ \   \ V  V / ___ \| |\  | |_| |
+|_|  |_/_/   \_\   \_/\_/_/   \_\_| \_|\____|
+EOF_BANNER
+}
+
+print_banner() {
+  banner_text
+  printf '%s\n' "$DISPLAY_NAME"
+  printf '%s\n' "$DISPLAY_TAGLINE"
 }
 
 json_escape() {
@@ -543,8 +561,6 @@ stop_service() {
 
 menu_text() {
   cat <<'EOF_MENU'
-
-FastVLESS
 1. 推荐一键安装/修复
 2. 查看 VLESS 链接
 3. 配置上游 SOCKS5 出站
@@ -704,6 +720,7 @@ uninstall_fastvless() {
 main_menu() {
   local choice upstream_input
   while :; do
+    print_banner
     menu_text
     read -r -p "请选择: " choice
     case "$choice" in

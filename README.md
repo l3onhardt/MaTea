@@ -1,6 +1,6 @@
-# FastVLESS
+# 马王脚本
 
-FastVLESS is a small Bash installer for a simple sing-box VLESS Reality server.
+马王脚本，也可以叫马哥梯子，是一个小型 Bash installer，用来快速部署简单的 sing-box VLESS Reality server。
 
 ## Goals
 

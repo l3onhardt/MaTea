@@ -29,6 +29,15 @@ test_script_exposes_app_name() {
   assert_eq "fastvless" "$APP_NAME" "APP_NAME is fastvless"
 }
 
+test_banner_contains_mawang_brand() {
+  local output
+  output="$(print_banner)"
+  printf '%s\n' "$output" | grep -q '马王脚本'
+  assert_eq "0" "$?" "banner shows Ma Wang brand"
+  printf '%s\n' "$output" | grep -q '马哥梯子'
+  assert_eq "0" "$?" "banner shows Ma Ge ladder tagline"
+}
+
 test_json_escape_quotes_and_backslashes() {
   local escaped
   escaped="$(json_escape 'a"b\c')"
