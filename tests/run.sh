@@ -64,6 +64,43 @@ test_state_round_trip() {
   assert_eq "www.example.com" "$REALITY_SNI" "state keeps SNI"
 }
 
+test_normalize_arch_maps_common_values() {
+  assert_eq "amd64" "$(normalize_arch x86_64)" "x86_64 maps to amd64"
+  assert_eq "arm64" "$(normalize_arch aarch64)" "aarch64 maps to arm64"
+  assert_eq "armv7" "$(normalize_arch armv7l)" "armv7l maps to armv7"
+}
+
+test_normalize_arch_rejects_unknown() {
+  if normalize_arch mips >/dev/null 2>&1; then
+    assert_eq "reject" "accept" "mips is unsupported"
+  else
+    assert_eq "reject" "reject" "mips is unsupported"
+  fi
+}
+
+test_detect_os_family_from_os_release() {
+  local fixture="$ROOT_DIR/tests/fixtures/os-release"
+  printf 'ID=ubuntu\nID_LIKE=debian\n' >"$fixture"
+  assert_eq "debian" "$(detect_os_family "$fixture")" "ubuntu is debian family"
+  printf 'ID=rocky\nID_LIKE=\"rhel fedora\"\n' >"$fixture"
+  assert_eq "rhel" "$(detect_os_family "$fixture")" "rocky is rhel family"
+  printf 'ID=alpine\n' >"$fixture"
+  assert_eq "alpine" "$(detect_os_family "$fixture")" "alpine is alpine family"
+}
+
+test_can_enable_bbr_blocks_containers() {
+  if can_enable_bbr "openvz" "bbr cubic"; then
+    assert_eq "block" "allow" "openvz blocks bbr changes"
+  else
+    assert_eq "block" "block" "openvz blocks bbr changes"
+  fi
+}
+
+test_can_enable_bbr_allows_kvm_with_bbr() {
+  can_enable_bbr "kvm" "bbr cubic"
+  assert_eq "0" "$?" "kvm with bbr module can enable bbr"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"

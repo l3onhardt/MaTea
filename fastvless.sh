@@ -105,6 +105,84 @@ load_state() {
   source "$STATE_FILE"
 }
 
+normalize_arch() {
+  case "${1:-$(uname -m)}" in
+    x86_64|amd64) printf 'amd64\n' ;;
+    aarch64|arm64) printf 'arm64\n' ;;
+    armv7l|armv7) printf 'armv7\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+detect_os_family() {
+  local os_release="${1:-/etc/os-release}"
+  local data id like
+  data="$(cat "$os_release" 2>/dev/null || true)"
+  id="$(printf '%s\n' "$data" | awk -F= '$1=="ID"{gsub(/"/,"",$2); print $2; exit}')"
+  like="$(printf '%s\n' "$data" | awk -F= '$1=="ID_LIKE"{gsub(/"/,"",$2); print $2; exit}')"
+  case " $id $like " in
+    *" debian "*|*" ubuntu "*) printf 'debian\n' ;;
+    *" rhel "*|*" centos "*|*" fedora "*|*" rocky "*|*" almalinux "*) printf 'rhel\n' ;;
+    *" alpine "*) printf 'alpine\n' ;;
+    *) printf 'unsupported\n' ;;
+  esac
+}
+
+detect_init_system() {
+  if command_exists systemctl && [[ -d /run/systemd/system || -d /etc/systemd/system ]]; then
+    printf 'systemd\n'
+  elif command_exists rc-service; then
+    printf 'openrc\n'
+  else
+    printf 'none\n'
+  fi
+}
+
+detect_virtualization() {
+  if command_exists systemd-detect-virt; then
+    systemd-detect-virt 2>/dev/null && return 0
+  fi
+  if [[ -f /proc/user_beancounters ]]; then
+    printf 'openvz\n'
+  elif grep -qaE 'docker|lxc|kubepods|containerd' /proc/1/cgroup 2>/dev/null; then
+    printf 'container\n'
+  elif grep -qaE 'KVM|QEMU' /proc/cpuinfo 2>/dev/null; then
+    printf 'kvm\n'
+  else
+    printf 'unknown\n'
+  fi
+}
+
+get_available_bbr_modules() {
+  sysctl net.ipv4.tcp_available_congestion_control 2>/dev/null | awk -F= '{gsub(/^ /,"",$2); print $2}'
+}
+
+get_current_bbr() {
+  sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk -F= '{gsub(/^ /,"",$2); print $2}'
+}
+
+can_enable_bbr() {
+  local virt="$1"
+  local available="$2"
+  case "$virt" in
+    openvz|lxc|container|docker) return 1 ;;
+  esac
+  printf '%s\n' "$available" | grep -qw bbr
+}
+
+free_space_mb() {
+  local path="${1:-/etc}"
+  df -Pm "$path" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+preflight_space_check() {
+  local etc_mb tmp_mb
+  etc_mb="$(free_space_mb /etc)"
+  tmp_mb="$(free_space_mb /tmp)"
+  [[ -n "$etc_mb" && "$etc_mb" -ge 150 ]] || die "/etc 可用空间不足 150MB"
+  [[ -n "$tmp_mb" && "$tmp_mb" -ge 150 ]] || die "/tmp 可用空间不足 150MB"
+}
+
 main() {
   printf '%s\n' "FastVLESS"
 }
