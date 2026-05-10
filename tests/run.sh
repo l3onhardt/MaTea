@@ -297,6 +297,13 @@ test_select_port_retries_invalid_value() {
   assert_eq "24443" "$selected" "select_port retries invalid input"
 }
 
+test_select_port_can_override_existing_port_default() {
+  local selected
+  VLESS_PORT="30000"
+  selected="$(printf '443\n' | select_port "VLESS" "$VLESS_PORT")"
+  assert_eq "443" "$selected" "select_port overrides existing port when user enters one"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"

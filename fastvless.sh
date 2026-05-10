@@ -663,10 +663,8 @@ recommended_install() {
   initialize_defaults
   install_sing_box_binary "$SING_BOX_VERSION_DEFAULT"
   UUID="${UUID:-$(generate_uuid)}"
-  if [[ -z "${VLESS_PORT:-}" ]]; then
-    VLESS_PORT="$(select_port "VLESS Reality" "$(choose_random_port)")"
-  fi
-  PUBLIC_VLESS_PORT="${PUBLIC_VLESS_PORT:-$VLESS_PORT}"
+  VLESS_PORT="$(select_port "VLESS Reality" "${VLESS_PORT:-$(choose_random_port)}")"
+  PUBLIC_VLESS_PORT="$VLESS_PORT"
   if prompt_yes_no "公网连接端口是否和本机监听端口不同（NAT 映射机器才需要）" "n"; then
     PUBLIC_VLESS_PORT="$(select_port "VLESS Reality 公网映射" "$VLESS_PORT")"
   fi
@@ -684,9 +682,7 @@ recommended_install() {
   fi
   if prompt_yes_no "是否导出本机 SOCKS5 给其他工具使用" "n"; then
     LOCAL_SOCKS_ENABLED="1"
-    if [[ -z "${LOCAL_SOCKS_PORT:-}" ]]; then
-      LOCAL_SOCKS_PORT="$(select_port "本机 SOCKS5" "$(choose_random_port)")"
-    fi
+    LOCAL_SOCKS_PORT="$(select_port "本机 SOCKS5" "${LOCAL_SOCKS_PORT:-$(choose_random_port)}")"
     if prompt_yes_no "是否允许公网访问本机 SOCKS5" "n"; then
       LOCAL_SOCKS_LISTEN="::"
       if prompt_yes_no "SOCKS5 公网连接端口是否和本机监听端口不同（NAT 映射机器才需要）" "n"; then
