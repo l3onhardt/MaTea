@@ -22,7 +22,9 @@ log_line() {
   local level="$1"
   shift
   mkdir -p "$BASE_DIR" 2>/dev/null || true
-  printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$*" >>"$LOG_FILE" 2>/dev/null || true
+  if [[ -d "$BASE_DIR" ]]; then
+    printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$*" >>"$LOG_FILE" 2>/dev/null || true
+  fi
 }
 
 info() {
@@ -43,6 +45,16 @@ die() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+now_ms() {
+  local value
+  value="$(date +%s%3N 2>/dev/null || true)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '%s000\n' "$(date +%s)"
+  fi
 }
 
 banner_text() {
@@ -433,16 +445,77 @@ validate_config_if_possible() {
 
 default_sni_candidates() {
   cat <<'EOF_SNI'
-www.microsoft.com
-www.apple.com
-www.cloudflare.com
-www.samsung.com
-www.oracle.com
-www.cisco.com
-www.ibm.com
-www.mozilla.org
-www.bing.com
+asia|www.sony.jp|5
+asia|www.panasonic.com|5
+asia|www.nintendo.co.jp|5
+asia|www.asus.com|8
+asia|www.acer.com|8
+asia|www.tsmc.com|8
+asia|www.cathaypacific.com|8
+asia|www.singaporeair.com|8
+asia|www.jal.co.jp|8
+asia|www.ana.co.jp|8
+asia|www.kddi.com|12
+asia|www.ntt.com|12
+asia|www.softbank.jp|15
+asia|www.samsung.com|25
+asia|www.cloudflare.com|180
+asia|www.microsoft.com|180
+americas|www.ibm.com|8
+americas|www.cisco.com|8
+americas|www.oracle.com|8
+americas|www.intel.com|8
+americas|www.amd.com|8
+americas|www.dell.com|12
+americas|www.hp.com|12
+americas|www.mozilla.org|20
+americas|www.apple.com|160
+americas|www.microsoft.com|180
+americas|www.cloudflare.com|180
+europe|www.sap.com|8
+europe|www.siemens.com|8
+europe|www.bosch.com|8
+europe|www.ericsson.com|10
+europe|www.nokia.com|10
+europe|www.volvocars.com|12
+europe|www.vodafone.com|15
+europe|www.bt.com|15
+europe|www.bbc.com|30
+europe|www.microsoft.com|180
+global|www.wikimedia.org|20
+global|www.debian.org|20
+global|www.ubuntu.com|25
+global|www.mozilla.org|30
+global|www.bing.com|120
+global|www.apple.com|160
+global|www.cloudflare.com|180
+global|www.microsoft.com|180
 EOF_SNI
+}
+
+guess_sni_region() {
+  local text="${1:-${SERVER_IP:-}}"
+  text="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
+  case "$text" in
+    *japan*|*tokyo*|*osaka*|*korea*|*seoul*|*singapore*|*hong*|*taiwan*|*asia*|*jp*|*kr*|*sg*|*hk*|*tw*) printf 'asia\n' ;;
+    *germany*|*france*|*netherlands*|*united*kingdom*|*london*|*europe*|*de*|*fr*|*nl*|*gb*) printf 'europe\n' ;;
+    *united*states*|*america*|*canada*|*americas*|*us*|*ca*) printf 'americas\n' ;;
+    *) printf 'global\n' ;;
+  esac
+}
+
+parse_sni_candidate_row() {
+  local row="$1"
+  SNI_ROW_REGION="$(awk -F'|' '{print $1}' <<<"$row")"
+  SNI_ROW_DOMAIN="$(awk -F'|' '{print $2}' <<<"$row")"
+  SNI_ROW_PENALTY="$(awk -F'|' '{print $3}' <<<"$row")"
+  [[ -n "$SNI_ROW_REGION" && -n "$SNI_ROW_DOMAIN" && "$SNI_ROW_PENALTY" =~ ^[0-9]+$ ]]
+}
+
+pick_sni_candidate_rows() {
+  local rows="$1"
+  local region="${2:-global}"
+  printf '%s\n' "$rows" | awk -F'|' -v region="$region" '$1==region || $1=="global"'
 }
 
 validate_sni_domain() {
@@ -450,45 +523,96 @@ validate_sni_domain() {
   [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]]
 }
 
+sni_tls_output_passes() {
+  local output="$1"
+  local domain="$2"
+  printf '%s\n' "$output" | grep -qi 'TLSv1.3' || return 1
+  printf '%s\n' "$output" | grep -i 'Server Temp Key' | grep -qi 'X25519' || return 1
+  printf '%s\n' "$output" | grep -qi 'ALPN protocol: h2' || return 1
+  printf '%s\n' "$output" | grep -qi 'Verify return code: 0 (ok)' || return 1
+  sni_cert_matches "$output" "$domain"
+}
+
+sni_cert_matches() {
+  local output="$1"
+  local domain="$2"
+  local parent wildcard
+  parent="${domain#*.}"
+  wildcard="*.${parent}"
+  if printf '%s\n' "$output" | grep -qi 'subject='; then
+    printf '%s\n' "$output" | grep -i 'subject=' | grep -Fqi "$domain" && return 0
+    printf '%s\n' "$output" | grep -i 'subject=' | grep -Fqi "$wildcard" && return 0
+  fi
+  if printf '%s\n' "$output" | grep -qi 'DNS:'; then
+    printf '%s\n' "$output" | grep -Fqi "DNS:$domain" && return 0
+    printf '%s\n' "$output" | grep -Fqi "DNS:$wildcard" && return 0
+  fi
+  return 1
+}
+
+http_redirect_penalty() {
+  local domain="$1"
+  local headers location_host
+  command_exists curl || {
+    printf '0\n'
+    return 0
+  }
+  headers="$(curl -IL --max-time 7 "https://${domain}" 2>/dev/null || true)"
+  location_host="$(printf '%s\n' "$headers" | awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2; exit}' | sed -E 's#https?://([^/[:space:]]+).*#\1#; s/\r//')"
+  if [[ -n "$location_host" && "$location_host" != "$domain" ]]; then
+    printf '500\n'
+  else
+    printf '0\n'
+  fi
+}
+
 check_sni_candidate() {
   local domain="$1"
-  local start end elapsed output
+  local penalty="${2:-0}"
+  local start end elapsed output redirect_penalty total_penalty
   validate_sni_domain "$domain" || {
-    printf '%s|fail|999999\n' "$domain"
+    printf '%s|fail|999999|999999|bad-domain\n' "$domain"
     return 0
   }
   command_exists openssl || {
-    printf '%s|pass|999\n' "$domain"
+    printf '%s|pass|999|%s|openssl-missing-soft-pass\n' "$domain" "$penalty"
     return 0
   }
-  start="$(date +%s%3N 2>/dev/null || date +%s)"
-  output="$(printf '' | timeout 6 openssl s_client -connect "${domain}:443" -servername "$domain" -tls1_3 -alpn h2 -brief 2>&1 || true)"
-  end="$(date +%s%3N 2>/dev/null || date +%s)"
+  start="$(now_ms)"
+  output="$(printf '' | openssl s_client -connect "${domain}:443" -servername "$domain" -tls1_3 -alpn h2 2>&1 </dev/null || true)"
+  end="$(now_ms)"
   elapsed=$((end - start))
-  if printf '%s\n' "$output" | grep -qiE 'Protocol version: TLSv1.3|Protocol *: TLSv1.3|CONNECTION ESTABLISHED'; then
-    printf '%s|pass|%s\n' "$domain" "$elapsed"
+  if sni_tls_output_passes "$output" "$domain"; then
+    redirect_penalty="$(http_redirect_penalty "$domain")"
+    total_penalty=$((penalty + redirect_penalty))
+    printf '%s|pass|%s|%s|strict-ok\n' "$domain" "$elapsed" "$total_penalty"
   else
-    printf '%s|fail|%s\n' "$domain" "$elapsed"
+    printf '%s|fail|%s|999999|strict-check-failed\n' "$domain" "$elapsed"
   fi
 }
 
 select_best_sni_row() {
   local rows="$1"
   printf '%s\n' "$rows" |
-    awk -F'|' '$2=="pass"{print $3 "|" $1}' |
+    awk -F'|' '$2=="pass"{print ($3 + $4) "|" $1}' |
     sort -n |
     head -n 1 |
     awk -F'|' '{print $2}'
 }
 
 select_reality_sni() {
-  local rows best domain
+  local rows best row region domain penalty
   rows=""
-  while IFS= read -r domain; do
-    [[ -n "$domain" ]] || continue
-    info "检测 SNI: $domain"
-    rows="${rows}$(check_sni_candidate "$domain")"$'\n'
-  done < <(default_sni_candidates)
+  region="$(guess_sni_region "${SERVER_REGION_HINT:-${SERVER_IP:-}}")"
+  info "SNI 候选地区: $region"
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    parse_sni_candidate_row "$row" || continue
+    domain="$SNI_ROW_DOMAIN"
+    penalty="$SNI_ROW_PENALTY"
+    info "严格检测 SNI: $domain"
+    rows="${rows}$(check_sni_candidate "$domain" "$penalty")"$'\n'
+  done < <(pick_sni_candidate_rows "$(default_sni_candidates)" "$region")
   best="$(select_best_sni_row "$rows")"
   if [[ -n "$best" ]]; then
     REALITY_SNI="$best"

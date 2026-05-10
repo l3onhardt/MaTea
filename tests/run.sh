@@ -44,6 +44,16 @@ test_json_escape_quotes_and_backslashes() {
   assert_eq 'a\"b\\c' "$escaped" "json_escape escapes quote and backslash"
 }
 
+test_now_ms_returns_digits() {
+  local value
+  value="$(now_ms)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    assert_eq "digits" "digits" "now_ms returns numeric timestamp"
+  else
+    assert_eq "digits" "$value" "now_ms returns numeric timestamp"
+  fi
+}
+
 test_valid_port_accepts_range() {
   valid_port "443"
   assert_eq "0" "$?" "valid_port accepts 443"
@@ -261,6 +271,78 @@ test_validate_sni_domain_rejects_protocol() {
 test_select_best_sni_row_picks_lowest_latency_pass() {
   local rows=$'www.slow.com|pass|300\nwww.fast.com|pass|80\nwww.fail.com|fail|20'
   assert_eq "www.fast.com" "$(select_best_sni_row "$rows")" "lowest latency passing SNI selected"
+}
+
+test_parse_sni_candidate_row_reads_region_domain_penalty() {
+  parse_sni_candidate_row "asia|www.example.jp|15"
+  assert_eq "asia" "$SNI_ROW_REGION" "sni row region"
+  assert_eq "www.example.jp" "$SNI_ROW_DOMAIN" "sni row domain"
+  assert_eq "15" "$SNI_ROW_PENALTY" "sni row penalty"
+}
+
+test_pick_sni_candidate_rows_prioritizes_region_and_global() {
+  local rows picked
+  rows=$'asia|asia.example.com|10\neurope|europe.example.com|10\nglobal|global.example.com|20'
+  picked="$(pick_sni_candidate_rows "$rows" "asia")"
+  printf '%s\n' "$picked" | grep -q 'asia.example.com'
+  assert_eq "0" "$?" "regional candidate included"
+  printf '%s\n' "$picked" | grep -q 'global.example.com'
+  assert_eq "0" "$?" "global candidate included"
+  if printf '%s\n' "$picked" | grep -q 'europe.example.com'; then
+    assert_eq "excluded" "included" "other region excluded"
+  else
+    assert_eq "excluded" "excluded" "other region excluded"
+  fi
+}
+
+test_guess_sni_region_accepts_lowercase_region_hint() {
+  assert_eq "asia" "$(guess_sni_region "asia")" "lowercase asia region hint"
+  assert_eq "europe" "$(guess_sni_region "europe")" "lowercase europe region hint"
+  assert_eq "americas" "$(guess_sni_region "americas")" "lowercase americas region hint"
+}
+
+test_select_best_sni_row_uses_score_not_latency_only() {
+  local rows=$'hot.example.com|pass|50|200|ok\nquiet.example.com|pass|120|0|ok\nbad.example.com|fail|10|0|tls13-missing'
+  assert_eq "quiet.example.com" "$(select_best_sni_row "$rows")" "SNI scoring penalizes hot candidates"
+}
+
+test_sni_output_requires_tls13_x25519_h2_and_cert_match() {
+  local output=$'subject=CN = www.example.com\nServer Temp Key: X25519, 253 bits\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\nALPN protocol: h2\nVerify return code: 0 (ok)'
+  sni_tls_output_passes "$output" "www.example.com"
+  assert_eq "0" "$?" "strict SNI output passes"
+}
+
+test_sni_output_accepts_subject_cn_spacing() {
+  local output=$'subject=CN = www.cloudflare.com\nServer Temp Key: X25519, 253 bits\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\nALPN protocol: h2\nVerify return code: 0 (ok)'
+  sni_tls_output_passes "$output" "www.cloudflare.com"
+  assert_eq "0" "$?" "subject CN with spaces passes"
+}
+
+test_sni_output_accepts_openssl_ecdh_x25519_format() {
+  local output=$'subject=/CN=www.cloudflare.com\nServer Temp Key: ECDH, X25519, 253 bits\nProtocol  : TLSv1.3\nALPN protocol: h2\nVerify return code: 0 (ok)'
+  sni_tls_output_passes "$output" "www.cloudflare.com"
+  assert_eq "0" "$?" "OpenSSL ECDH X25519 format passes"
+}
+
+test_sni_cert_matches_accepts_subject_with_org_fields() {
+  local output=$'subject=C = JP, ST = Tokyo, O = Sony Marketing Inc., CN = www.sony.jp'
+  sni_cert_matches "$output" "www.sony.jp"
+  assert_eq "0" "$?" "subject with organization fields matches domain"
+}
+
+test_sni_cert_matches_accepts_wildcard_parent() {
+  local output=$'subject=CN = *.example.com'
+  sni_cert_matches "$output" "www.example.com"
+  assert_eq "0" "$?" "wildcard parent matches domain"
+}
+
+test_sni_output_rejects_missing_h2() {
+  local output=$'subject=CN = www.example.com\nServer Temp Key: X25519, 253 bits\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\nALPN protocol: http/1.1\nVerify return code: 0 (ok)'
+  if sni_tls_output_passes "$output" "www.example.com"; then
+    assert_eq "reject" "accept" "missing h2 rejected"
+  else
+    assert_eq "reject" "reject" "missing h2 rejected"
+  fi
 }
 
 test_write_bbr_sysctl_file() {
