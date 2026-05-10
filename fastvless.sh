@@ -183,6 +183,60 @@ preflight_space_check() {
   [[ -n "$tmp_mb" && "$tmp_mb" -ge 150 ]] || die "/tmp 可用空间不足 150MB"
 }
 
+parse_socks_uri() {
+  local input="${1:-}"
+  local body auth hostport parts_count
+  SOCKS_HOST=""
+  SOCKS_PORT=""
+  SOCKS_USER=""
+  SOCKS_PASS=""
+
+  [[ "$input" == socks5://* ]] || return 1
+  body="${input#socks5://}"
+  [[ -n "$body" ]] || return 1
+
+  if [[ "$body" == *@* ]]; then
+    auth="${body%@*}"
+    hostport="${body#*@}"
+    [[ "$auth" == *:* && "$hostport" == *:* ]] || return 1
+    SOCKS_USER="${auth%%:*}"
+    SOCKS_PASS="${auth#*:}"
+    SOCKS_HOST="${hostport%:*}"
+    SOCKS_PORT="${hostport##*:}"
+  else
+    parts_count="$(awk -F: '{print NF}' <<<"$body")"
+    [[ "$parts_count" -eq 4 ]] || return 1
+    SOCKS_HOST="$(awk -F: '{print $1}' <<<"$body")"
+    SOCKS_PORT="$(awk -F: '{print $2}' <<<"$body")"
+    SOCKS_USER="$(awk -F: '{print $3}' <<<"$body")"
+    SOCKS_PASS="$(awk -F: '{print $4}' <<<"$body")"
+  fi
+
+  [[ -n "$SOCKS_HOST" && -n "$SOCKS_USER" && -n "$SOCKS_PASS" ]] || return 1
+  valid_port "$SOCKS_PORT"
+}
+
+build_socks_links() {
+  local ip="${SERVER_IP:-}"
+  local port="${LOCAL_SOCKS_PUBLIC_PORT:-${LOCAL_SOCKS_PORT:-}}"
+  local user="${LOCAL_SOCKS_USER:-}"
+  local pass="${LOCAL_SOCKS_PASS:-}"
+  [[ -n "$ip" && -n "$port" && -n "$user" && -n "$pass" ]] || return 1
+  printf 'SOCKS5 标准格式: socks5://%s:%s@%s:%s\n' "$user" "$pass" "$ip" "$port"
+  printf 'SOCKS5 兼容格式: socks5://%s:%s:%s:%s\n' "$ip" "$port" "$user" "$pass"
+}
+
+configure_upstream_socks_from_uri() {
+  local input="$1"
+  parse_socks_uri "$input" || return 1
+  UPSTREAM_SOCKS_ENABLED="1"
+  UPSTREAM_SOCKS_HOST="$SOCKS_HOST"
+  UPSTREAM_SOCKS_PORT="$SOCKS_PORT"
+  UPSTREAM_SOCKS_USER="$SOCKS_USER"
+  UPSTREAM_SOCKS_PASS="$SOCKS_PASS"
+  save_state
+}
+
 main() {
   printf '%s\n' "FastVLESS"
 }

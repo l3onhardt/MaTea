@@ -101,6 +101,43 @@ test_can_enable_bbr_allows_kvm_with_bbr() {
   assert_eq "0" "$?" "kvm with bbr module can enable bbr"
 }
 
+test_parse_socks_legacy_format() {
+  parse_socks_uri 'socks5://82.153.200.96:45001:dVO69eb58eac45a6:k8oRVgpuiE29MKCTOd'
+  assert_eq "82.153.200.96" "$SOCKS_HOST" "legacy socks host"
+  assert_eq "45001" "$SOCKS_PORT" "legacy socks port"
+  assert_eq "dVO69eb58eac45a6" "$SOCKS_USER" "legacy socks user"
+  assert_eq "k8oRVgpuiE29MKCTOd" "$SOCKS_PASS" "legacy socks password"
+}
+
+test_parse_socks_standard_uri() {
+  parse_socks_uri 'socks5://user123:pass456@proxy.example.com:1080'
+  assert_eq "proxy.example.com" "$SOCKS_HOST" "standard socks host"
+  assert_eq "1080" "$SOCKS_PORT" "standard socks port"
+  assert_eq "user123" "$SOCKS_USER" "standard socks user"
+  assert_eq "pass456" "$SOCKS_PASS" "standard socks password"
+}
+
+test_parse_socks_rejects_bad_port() {
+  if parse_socks_uri 'socks5://host:99999:user:pass'; then
+    assert_eq "reject" "accept" "socks rejects bad port"
+  else
+    assert_eq "reject" "reject" "socks rejects bad port"
+  fi
+}
+
+test_build_socks_links_outputs_two_formats() {
+  SERVER_IP="203.0.113.9"
+  LOCAL_SOCKS_PUBLIC_PORT="24080"
+  LOCAL_SOCKS_USER="localuser"
+  LOCAL_SOCKS_PASS="localpass"
+  local output
+  output="$(build_socks_links)"
+  printf '%s\n' "$output" | grep -q 'socks5://localuser:localpass@203.0.113.9:24080'
+  assert_eq "0" "$?" "socks auth URI is printed"
+  printf '%s\n' "$output" | grep -q 'socks5://203.0.113.9:24080:localuser:localpass'
+  assert_eq "0" "$?" "socks compatibility URI is printed"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"
