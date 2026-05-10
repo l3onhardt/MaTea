@@ -119,6 +119,7 @@ save_state() {
     printf 'REALITY_PUBLIC_KEY=%q\n' "${REALITY_PUBLIC_KEY:-}"
     printf 'REALITY_SHORT_ID=%q\n' "${REALITY_SHORT_ID:-}"
     printf 'SERVER_IP=%q\n' "${SERVER_IP:-}"
+    printf 'SERVER_REGION_HINT=%q\n' "${SERVER_REGION_HINT:-}"
     printf 'UPSTREAM_SOCKS_ENABLED=%q\n' "${UPSTREAM_SOCKS_ENABLED:-0}"
     printf 'UPSTREAM_SOCKS_HOST=%q\n' "${UPSTREAM_SOCKS_HOST:-}"
     printf 'UPSTREAM_SOCKS_PORT=%q\n' "${UPSTREAM_SOCKS_PORT:-}"
@@ -502,11 +503,84 @@ guess_sni_region() {
   local text="${1:-${SERVER_IP:-}}"
   text="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
   case "$text" in
-    *japan*|*tokyo*|*osaka*|*korea*|*seoul*|*singapore*|*hong*|*taiwan*|*asia*|*jp*|*kr*|*sg*|*hk*|*tw*) printf 'asia\n' ;;
-    *germany*|*france*|*netherlands*|*united*kingdom*|*london*|*europe*|*de*|*fr*|*nl*|*gb*) printf 'europe\n' ;;
-    *united*states*|*america*|*canada*|*americas*|*us*|*ca*) printf 'americas\n' ;;
+    japan|jp|tokyo|osaka|korea|kr|seoul|singapore|sg|hong*|hk|taiwan|tw|asia) printf 'asia\n' ;;
+    germany|de|france|fr|netherlands|nl|united*kingdom|gb|uk|london|europe) printf 'europe\n' ;;
+    united*states|us|america|canada|ca|americas) printf 'americas\n' ;;
     *) printf 'global\n' ;;
   esac
+}
+
+extract_country_code_from_geo_response() {
+  local response="$1"
+  local code
+  code="$(printf '%s\n' "$response" |
+    awk -F'["=:, ]+' '
+      BEGIN { IGNORECASE=1 }
+      {
+        for (i = 1; i <= NF; i++) {
+          if (($i == "countryCode" || $i == "country_code" || $i == "country") && (i + 1) <= NF) {
+            print $(i + 1)
+            exit
+          }
+        }
+      }
+    ' |
+    tr -dc 'A-Za-z' |
+    tr '[:lower:]' '[:upper:]' |
+    head -c 2)"
+  [[ "$code" =~ ^[A-Z][A-Z]$ ]] && printf '%s\n' "$code"
+}
+
+detect_server_country_code() {
+  local ip="${1:-${SERVER_IP:-}}"
+  local url response code
+  if [[ -n "${FASTVLESS_TEST_GEO_RESPONSE:-}" ]]; then
+    extract_country_code_from_geo_response "$FASTVLESS_TEST_GEO_RESPONSE"
+    return
+  fi
+  [[ -n "$ip" ]] || return 1
+  for url in \
+    "http://ip-api.com/line/${ip}?fields=countryCode" \
+    "https://ipapi.co/${ip}/country/" \
+    "https://ipinfo.io/${ip}/country"; do
+    if command_exists curl; then
+      response="$(curl -fsS --max-time 4 "$url" 2>/dev/null || true)"
+    elif command_exists wget; then
+      response="$(wget -qO- --timeout=4 "$url" 2>/dev/null || true)"
+    else
+      return 1
+    fi
+    code="$(extract_country_code_from_geo_response "$response")"
+    if [[ -z "$code" ]]; then
+      code="$(printf '%s' "$response" | tr -dc 'A-Za-z' | tr '[:lower:]' '[:upper:]' | head -c 2)"
+    fi
+    if [[ "$code" =~ ^[A-Z][A-Z]$ ]]; then
+      printf '%s\n' "$code"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_sni_region() {
+  local country region
+  if [[ -n "${SERVER_REGION_HINT:-}" ]]; then
+    region="$(guess_sni_region "$SERVER_REGION_HINT")"
+    [[ "$region" != "global" ]] && {
+      printf '%s\n' "$region"
+      return 0
+    }
+  fi
+  country="$(detect_server_country_code "${SERVER_IP:-}" || true)"
+  if [[ -n "$country" ]]; then
+    SERVER_REGION_HINT="$country"
+    region="$(guess_sni_region "$country")"
+    [[ "$region" != "global" ]] && {
+      printf '%s\n' "$region"
+      return 0
+    }
+  fi
+  guess_sni_region "${SERVER_REGION_HINT:-${SERVER_IP:-}}"
 }
 
 parse_sni_candidate_row() {
@@ -608,7 +682,7 @@ select_best_sni_row() {
 select_reality_sni() {
   local rows best row region domain penalty
   rows=""
-  region="$(guess_sni_region "${SERVER_REGION_HINT:-${SERVER_IP:-}}")"
+  region="$(resolve_sni_region)"
   info "SNI 候选地区: $region"
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
@@ -789,6 +863,7 @@ initialize_defaults() {
   REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-}"
   REALITY_SHORT_ID="${REALITY_SHORT_ID:-}"
   SERVER_IP="${SERVER_IP:-}"
+  SERVER_REGION_HINT="${SERVER_REGION_HINT:-}"
   UPSTREAM_SOCKS_ENABLED="${UPSTREAM_SOCKS_ENABLED:-0}"
   LOCAL_SOCKS_ENABLED="${LOCAL_SOCKS_ENABLED:-0}"
   LOCAL_SOCKS_LISTEN="${LOCAL_SOCKS_LISTEN:-127.0.0.1}"

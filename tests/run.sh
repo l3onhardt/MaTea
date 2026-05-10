@@ -77,14 +77,17 @@ test_state_round_trip() {
   UUID="11111111-1111-4111-8111-111111111111"
   VLESS_PORT="24443"
   REALITY_SNI="www.example.com"
+  SERVER_REGION_HINT="asia"
   save_state
   UUID=""
   VLESS_PORT=""
   REALITY_SNI=""
+  SERVER_REGION_HINT=""
   load_state
   assert_eq "11111111-1111-4111-8111-111111111111" "$UUID" "state keeps UUID"
   assert_eq "24443" "$VLESS_PORT" "state keeps VLESS port"
   assert_eq "www.example.com" "$REALITY_SNI" "state keeps SNI"
+  assert_eq "asia" "$SERVER_REGION_HINT" "state keeps region hint"
 }
 
 test_normalize_arch_maps_common_values() {
@@ -305,6 +308,24 @@ test_guess_sni_region_accepts_lowercase_region_hint() {
   assert_eq "asia" "$(guess_sni_region "asia")" "lowercase asia region hint"
   assert_eq "europe" "$(guess_sni_region "europe")" "lowercase europe region hint"
   assert_eq "americas" "$(guess_sni_region "americas")" "lowercase americas region hint"
+}
+
+test_guess_sni_region_accepts_country_codes() {
+  assert_eq "asia" "$(guess_sni_region "JP")" "JP country code maps to asia"
+  assert_eq "europe" "$(guess_sni_region "DE")" "DE country code maps to europe"
+  assert_eq "americas" "$(guess_sni_region "US")" "US country code maps to americas"
+}
+
+test_extract_country_code_from_geo_response() {
+  assert_eq "JP" "$(extract_country_code_from_geo_response $'{\"country\":\"JP\",\"countryCode\":\"JP\"}')" "extracts JSON country code"
+  assert_eq "JP" "$(extract_country_code_from_geo_response $'status=success\ncountryCode=JP\nquery=103.197.210.52')" "extracts plain text country code"
+}
+
+test_resolve_sni_region_uses_detected_country_before_ip_guess() {
+  SERVER_REGION_HINT=""
+  SERVER_IP="103.197.210.52"
+  FASTVLESS_TEST_GEO_RESPONSE='{"countryCode":"JP"}'
+  assert_eq "asia" "$(resolve_sni_region)" "detected JP chooses asia"
 }
 
 test_select_best_sni_row_uses_score_not_latency_only() {
