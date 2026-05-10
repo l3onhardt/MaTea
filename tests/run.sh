@@ -304,14 +304,32 @@ test_pick_sni_candidate_rows_prioritizes_region_and_global() {
   fi
 }
 
+test_pick_sni_candidate_rows_for_japan_includes_jp_asia_and_global() {
+  local rows picked
+  rows=$'jp|jp.example.com|5\nasia|asia.example.com|10\neurope|europe.example.com|10\nglobal|global.example.com|20'
+  picked="$(pick_sni_candidate_rows "$rows" "jp")"
+  printf '%s\n' "$picked" | grep -q 'jp.example.com'
+  assert_eq "0" "$?" "jp candidate included"
+  printf '%s\n' "$picked" | grep -q 'asia.example.com'
+  assert_eq "0" "$?" "asia fallback included for jp"
+  printf '%s\n' "$picked" | grep -q 'global.example.com'
+  assert_eq "0" "$?" "global fallback included for jp"
+  if printf '%s\n' "$picked" | grep -q 'europe.example.com'; then
+    assert_eq "excluded" "included" "unrelated region excluded for jp"
+  else
+    assert_eq "excluded" "excluded" "unrelated region excluded for jp"
+  fi
+}
+
 test_guess_sni_region_accepts_lowercase_region_hint() {
+  assert_eq "jp" "$(guess_sni_region "jp")" "lowercase jp region hint"
   assert_eq "asia" "$(guess_sni_region "asia")" "lowercase asia region hint"
   assert_eq "europe" "$(guess_sni_region "europe")" "lowercase europe region hint"
   assert_eq "americas" "$(guess_sni_region "americas")" "lowercase americas region hint"
 }
 
 test_guess_sni_region_accepts_country_codes() {
-  assert_eq "asia" "$(guess_sni_region "JP")" "JP country code maps to asia"
+  assert_eq "jp" "$(guess_sni_region "JP")" "JP country code maps to japan"
   assert_eq "europe" "$(guess_sni_region "DE")" "DE country code maps to europe"
   assert_eq "americas" "$(guess_sni_region "US")" "US country code maps to americas"
 }
@@ -325,12 +343,16 @@ test_resolve_sni_region_uses_detected_country_before_ip_guess() {
   SERVER_REGION_HINT=""
   SERVER_IP="103.197.210.52"
   FASTVLESS_TEST_GEO_RESPONSE='{"countryCode":"JP"}'
-  assert_eq "asia" "$(resolve_sni_region)" "detected JP chooses asia"
+  assert_eq "jp" "$(resolve_sni_region)" "detected JP chooses japan"
 }
 
 test_select_best_sni_row_uses_score_not_latency_only() {
   local rows=$'hot.example.com|pass|50|200|ok\nquiet.example.com|pass|120|0|ok\nbad.example.com|fail|10|0|tls13-missing'
   assert_eq "quiet.example.com" "$(select_best_sni_row "$rows")" "SNI scoring penalizes hot candidates"
+}
+
+test_format_sni_result_shows_latency_score_and_status() {
+  assert_eq "www.example.com pass 120ms score=125 strict-ok" "$(format_sni_result 'www.example.com|pass|120|5|strict-ok')" "formats SNI pass result"
 }
 
 test_sni_output_requires_tls13_x25519_h2_and_cert_match() {

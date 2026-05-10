@@ -451,19 +451,19 @@ validate_config_if_possible() {
 
 default_sni_candidates() {
   cat <<'EOF_SNI'
-asia|www.sony.jp|5
-asia|www.panasonic.com|5
-asia|www.nintendo.co.jp|5
+jp|www.sony.jp|3
+jp|www.nintendo.co.jp|3
+jp|www.panasonic.com|5
+jp|www.jal.co.jp|5
+jp|www.ana.co.jp|5
+jp|www.kddi.com|8
+jp|www.ntt.com|8
+jp|www.softbank.jp|12
 asia|www.asus.com|8
 asia|www.acer.com|8
 asia|www.tsmc.com|8
 asia|www.cathaypacific.com|8
 asia|www.singaporeair.com|8
-asia|www.jal.co.jp|8
-asia|www.ana.co.jp|8
-asia|www.kddi.com|12
-asia|www.ntt.com|12
-asia|www.softbank.jp|15
 asia|www.samsung.com|25
 asia|www.cloudflare.com|180
 asia|www.microsoft.com|180
@@ -503,7 +503,8 @@ guess_sni_region() {
   local text="${1:-${SERVER_IP:-}}"
   text="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
   case "$text" in
-    japan|jp|tokyo|osaka|korea|kr|seoul|singapore|sg|hong*|hk|taiwan|tw|asia) printf 'asia\n' ;;
+    japan|jp|tokyo|osaka) printf 'jp\n' ;;
+    korea|kr|seoul|singapore|sg|hong*|hk|taiwan|tw|asia) printf 'asia\n' ;;
     germany|de|france|fr|netherlands|nl|united*kingdom|gb|uk|london|europe) printf 'europe\n' ;;
     united*states|us|america|canada|ca|americas) printf 'americas\n' ;;
     *) printf 'global\n' ;;
@@ -594,7 +595,9 @@ parse_sni_candidate_row() {
 pick_sni_candidate_rows() {
   local rows="$1"
   local region="${2:-global}"
-  printf '%s\n' "$rows" | awk -F'|' -v region="$region" '$1==region || $1=="global"'
+  printf '%s\n' "$rows" | awk -F'|' -v region="$region" '
+    $1==region || $1=="global" || (region=="jp" && $1=="asia")
+  '
 }
 
 validate_sni_domain() {
@@ -679,8 +682,16 @@ select_best_sni_row() {
     awk -F'|' '{print $2}'
 }
 
+format_sni_result() {
+  local row="$1"
+  awk -F'|' '{
+    score = $3 + $4
+    printf "%s %s %sms score=%s %s", $1, $2, $3, score, $5
+  }' <<<"$row"
+}
+
 select_reality_sni() {
-  local rows best row region domain penalty
+  local rows best row region domain penalty result
   rows=""
   region="$(resolve_sni_region)"
   info "SNI 候选地区: $region"
@@ -690,7 +701,9 @@ select_reality_sni() {
     domain="$SNI_ROW_DOMAIN"
     penalty="$SNI_ROW_PENALTY"
     info "严格检测 SNI: $domain"
-    rows="${rows}$(check_sni_candidate "$domain" "$penalty")"$'\n'
+    result="$(check_sni_candidate "$domain" "$penalty")"
+    info "SNI 结果: $(format_sni_result "$result")"
+    rows="${rows}${result}"$'\n'
   done < <(pick_sni_candidate_rows "$(default_sni_candidates)" "$region")
   best="$(select_best_sni_row "$rows")"
   if [[ -n "$best" ]]; then
