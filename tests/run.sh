@@ -279,6 +279,24 @@ test_initialize_defaults_sets_safe_local_socks() {
   assert_eq "" "$LOCAL_SOCKS_PORT" "local socks port is chosen only when enabled"
 }
 
+test_select_port_uses_user_value() {
+  local selected
+  selected="$(printf '24443\n' | select_port "VLESS" "23333")"
+  assert_eq "24443" "$selected" "select_port accepts user port"
+}
+
+test_select_port_uses_default_on_empty() {
+  local selected
+  selected="$(printf '\n' | select_port "VLESS" "23333")"
+  assert_eq "23333" "$selected" "select_port uses default on empty input"
+}
+
+test_select_port_retries_invalid_value() {
+  local selected
+  selected="$(printf '70000\n24443\n' | select_port "VLESS" "23333")"
+  assert_eq "24443" "$selected" "select_port retries invalid input"
+}
+
 main() {
   rm -rf "$ROOT_DIR/tests/fixtures/etc" "$ROOT_DIR/tests/fixtures/systemd" "$ROOT_DIR/tests/fixtures/sysctl.d"
   mkdir -p "$ROOT_DIR/tests/fixtures"

@@ -611,6 +611,21 @@ choose_random_port() {
   done
 }
 
+select_port() {
+  local label="$1"
+  local default_port="$2"
+  local input
+  while :; do
+    read -r -p "$label 端口，回车使用随机端口 $default_port: " input
+    input="${input:-$default_port}"
+    if valid_port "$input"; then
+      printf '%s\n' "$input"
+      return 0
+    fi
+    warn "端口不正确，请输入 1-65535" >&2
+  done
+}
+
 get_public_ip() {
   local ip
   for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
@@ -648,8 +663,13 @@ recommended_install() {
   initialize_defaults
   install_sing_box_binary "$SING_BOX_VERSION_DEFAULT"
   UUID="${UUID:-$(generate_uuid)}"
-  VLESS_PORT="${VLESS_PORT:-$(choose_random_port)}"
+  if [[ -z "${VLESS_PORT:-}" ]]; then
+    VLESS_PORT="$(select_port "VLESS Reality" "$(choose_random_port)")"
+  fi
   PUBLIC_VLESS_PORT="${PUBLIC_VLESS_PORT:-$VLESS_PORT}"
+  if prompt_yes_no "公网连接端口是否和本机监听端口不同（NAT 映射机器才需要）" "n"; then
+    PUBLIC_VLESS_PORT="$(select_port "VLESS Reality 公网映射" "$VLESS_PORT")"
+  fi
   SERVER_IP="${SERVER_IP:-$(get_public_ip || true)}"
   [[ -n "$SERVER_IP" ]] || read -r -p "未能自动识别公网 IP，请输入服务器 IP: " SERVER_IP
   generate_reality_values
@@ -664,11 +684,19 @@ recommended_install() {
   fi
   if prompt_yes_no "是否导出本机 SOCKS5 给其他工具使用" "n"; then
     LOCAL_SOCKS_ENABLED="1"
-    LOCAL_SOCKS_PORT="${LOCAL_SOCKS_PORT:-$(choose_random_port)}"
+    if [[ -z "${LOCAL_SOCKS_PORT:-}" ]]; then
+      LOCAL_SOCKS_PORT="$(select_port "本机 SOCKS5" "$(choose_random_port)")"
+    fi
     if prompt_yes_no "是否允许公网访问本机 SOCKS5" "n"; then
       LOCAL_SOCKS_LISTEN="::"
+      if prompt_yes_no "SOCKS5 公网连接端口是否和本机监听端口不同（NAT 映射机器才需要）" "n"; then
+        LOCAL_SOCKS_PUBLIC_PORT="$(select_port "SOCKS5 公网映射" "$LOCAL_SOCKS_PORT")"
+      else
+        LOCAL_SOCKS_PUBLIC_PORT="$LOCAL_SOCKS_PORT"
+      fi
     else
       LOCAL_SOCKS_LISTEN="127.0.0.1"
+      LOCAL_SOCKS_PUBLIC_PORT="$LOCAL_SOCKS_PORT"
     fi
   fi
   if prompt_yes_no "是否一键启用保守 BBR 加速" "y"; then
