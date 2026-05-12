@@ -343,7 +343,17 @@ test_resolve_sni_region_uses_detected_country_before_ip_guess() {
   SERVER_REGION_HINT=""
   SERVER_IP="103.197.210.52"
   FASTVLESS_TEST_GEO_RESPONSE='{"countryCode":"JP"}'
-  assert_eq "jp" "$(resolve_sni_region)" "detected JP chooses japan"
+  resolve_sni_region >/dev/null
+  assert_eq "jp" "$RESOLVED_SNI_REGION" "detected JP chooses japan"
+}
+
+test_refresh_sni_region_ignores_stale_saved_hint() {
+  SERVER_REGION_HINT="global"
+  SERVER_IP="103.197.210.52"
+  FASTVLESS_TEST_GEO_RESPONSE='{"countryCode":"JP"}'
+  refresh_sni_region >/dev/null
+  assert_eq "jp" "$RESOLVED_SNI_REGION" "refresh ignores stale saved region hint"
+  assert_eq "JP" "$SERVER_REGION_HINT" "refresh stores detected country code"
 }
 
 test_select_best_sni_row_uses_score_not_latency_only() {

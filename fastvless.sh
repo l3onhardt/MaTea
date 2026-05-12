@@ -565,9 +565,11 @@ detect_server_country_code() {
 
 resolve_sni_region() {
   local country region
+  RESOLVED_SNI_REGION=""
   if [[ -n "${SERVER_REGION_HINT:-}" ]]; then
     region="$(guess_sni_region "$SERVER_REGION_HINT")"
     [[ "$region" != "global" ]] && {
+      RESOLVED_SNI_REGION="$region"
       printf '%s\n' "$region"
       return 0
     }
@@ -577,11 +579,29 @@ resolve_sni_region() {
     SERVER_REGION_HINT="$country"
     region="$(guess_sni_region "$country")"
     [[ "$region" != "global" ]] && {
+      RESOLVED_SNI_REGION="$region"
       printf '%s\n' "$region"
       return 0
     }
   fi
-  guess_sni_region "${SERVER_REGION_HINT:-${SERVER_IP:-}}"
+  RESOLVED_SNI_REGION="$(guess_sni_region "${SERVER_REGION_HINT:-${SERVER_IP:-}}")"
+  printf '%s\n' "$RESOLVED_SNI_REGION"
+}
+
+refresh_sni_region() {
+  local country region
+  RESOLVED_SNI_REGION=""
+  country="$(detect_server_country_code "${SERVER_IP:-}" || true)"
+  if [[ -n "$country" ]]; then
+    SERVER_REGION_HINT="$country"
+    region="$(guess_sni_region "$country")"
+    RESOLVED_SNI_REGION="$region"
+    printf '%s\n' "$region"
+    return 0
+  fi
+  SERVER_REGION_HINT=""
+  RESOLVED_SNI_REGION="$(guess_sni_region "${SERVER_IP:-}")"
+  printf '%s\n' "$RESOLVED_SNI_REGION"
 }
 
 parse_sni_candidate_row() {
@@ -693,7 +713,12 @@ format_sni_result() {
 select_reality_sni() {
   local rows best row region domain penalty result
   rows=""
-  region="$(resolve_sni_region)"
+  if [[ "${SNI_FORCE_REFRESH_REGION:-0}" == "1" ]]; then
+    refresh_sni_region >/dev/null
+  else
+    resolve_sni_region >/dev/null
+  fi
+  region="${RESOLVED_SNI_REGION:-global}"
   info "SNI 候选地区: $region"
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
@@ -1065,7 +1090,7 @@ main_menu() {
       2) show_links ;;
       3) read -r -p "请输入上游 SOCKS5: " upstream_input; configure_upstream_socks_from_uri "$upstream_input" && write_config "$CONFIG_FILE" && restart_service_and_verify && write_links ;;
       4) load_state; initialize_defaults; if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then disable_local_socks; else enable_local_socks_default; fi; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
-      5) load_state; select_reality_sni || die "SNI 重新选择失败"; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
+      5) load_state; SNI_FORCE_REFRESH_REGION=1 select_reality_sni || die "SNI 重新选择失败"; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
       6) enable_bbr_if_supported || true ;;
       7) show_status ;;
       8) uninstall_fastvless ;;
