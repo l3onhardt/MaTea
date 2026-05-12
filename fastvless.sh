@@ -87,6 +87,10 @@ trim_input() {
   printf '%s' "${1:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+strip_null_bytes() {
+  LC_ALL=C tr -d '\000'
+}
+
 valid_port() {
   local port
   port="$(trim_input "${1:-}")"
@@ -616,7 +620,7 @@ pick_sni_candidate_rows() {
   local rows="$1"
   local region="${2:-global}"
   printf '%s\n' "$rows" | awk -F'|' -v region="$region" '
-    $1==region || $1=="global" || (region=="jp" && $1=="asia")
+    ($1==region || $1=="global" || (region=="jp" && $1=="asia")) && !seen[$2]++
   '
 }
 
@@ -681,7 +685,7 @@ check_sni_candidate() {
     return 0
   }
   start="$(now_ms)"
-  output="$(printf '' | openssl s_client -connect "${domain}:443" -servername "$domain" -tls1_3 -alpn h2 2>&1 </dev/null || true)"
+  output="$(printf '' | openssl s_client -connect "${domain}:443" -servername "$domain" -tls1_3 -alpn h2 2>&1 </dev/null | strip_null_bytes || true)"
   end="$(now_ms)"
   elapsed=$((end - start))
   if sni_tls_output_passes "$output" "$domain"; then
@@ -1090,7 +1094,7 @@ main_menu() {
       2) show_links ;;
       3) read -r -p "请输入上游 SOCKS5: " upstream_input; configure_upstream_socks_from_uri "$upstream_input" && write_config "$CONFIG_FILE" && restart_service_and_verify && write_links ;;
       4) load_state; initialize_defaults; if [[ "${LOCAL_SOCKS_ENABLED:-0}" == "1" ]]; then disable_local_socks; else enable_local_socks_default; fi; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
-      5) load_state; SNI_FORCE_REFRESH_REGION=1 select_reality_sni || die "SNI 重新选择失败"; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
+      5) load_state; info "重新优选只会更换 sni，UUID/pbk/sid 会保持不变"; SNI_FORCE_REFRESH_REGION=1 select_reality_sni || die "SNI 重新选择失败"; save_state; write_config "$CONFIG_FILE"; restart_service_and_verify; write_links; show_links ;;
       6) enable_bbr_if_supported || true ;;
       7) show_status ;;
       8) uninstall_fastvless ;;

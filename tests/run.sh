@@ -306,7 +306,7 @@ test_pick_sni_candidate_rows_prioritizes_region_and_global() {
 
 test_pick_sni_candidate_rows_for_japan_includes_jp_asia_and_global() {
   local rows picked
-  rows=$'jp|jp.example.com|5\nasia|asia.example.com|10\neurope|europe.example.com|10\nglobal|global.example.com|20'
+  rows=$'jp|jp.example.com|5\nasia|asia.example.com|10\nasia|shared.example.com|80\neurope|europe.example.com|10\nglobal|shared.example.com|20\nglobal|global.example.com|20'
   picked="$(pick_sni_candidate_rows "$rows" "jp")"
   printf '%s\n' "$picked" | grep -q 'jp.example.com'
   assert_eq "0" "$?" "jp candidate included"
@@ -319,6 +319,7 @@ test_pick_sni_candidate_rows_for_japan_includes_jp_asia_and_global() {
   else
     assert_eq "excluded" "excluded" "unrelated region excluded for jp"
   fi
+  assert_eq "1" "$(printf '%s\n' "$picked" | grep -c 'shared.example.com')" "duplicate domains are deduped"
 }
 
 test_guess_sni_region_accepts_lowercase_region_hint() {
@@ -363,6 +364,10 @@ test_select_best_sni_row_uses_score_not_latency_only() {
 
 test_format_sni_result_shows_latency_score_and_status() {
   assert_eq "www.example.com pass 120ms score=125 strict-ok" "$(format_sni_result 'www.example.com|pass|120|5|strict-ok')" "formats SNI pass result"
+}
+
+test_strip_null_bytes_removes_openssl_nuls() {
+  assert_eq "abc" "$(printf 'a\0b\0c' | strip_null_bytes)" "NUL bytes stripped"
 }
 
 test_sni_output_requires_tls13_x25519_h2_and_cert_match() {
